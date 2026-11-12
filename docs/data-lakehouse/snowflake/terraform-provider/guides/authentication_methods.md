@@ -1,0 +1,654 @@
+---
+page_title: "Authentication Methods"
+subcategory: ""
+description: |-
+
+---
+# Authentication methods
+
+This guide focuses on providing an example on every authentication method available in the provider.
+Each method includes steps for setting dependencies, like MFA app, and getting encrypted/unencrypted keys.
+For now, we provide examples for the most common use cases.
+The rest of the options (Okta, ExternalBrowser, TokenAccessor) are planned to be added later on.
+
+[//]: # (TODO: SNOW-1791729)
+
+## Protecting secret values
+
+When using any of the provided methods, remember to securely store sensitive information.
+
+Here's a list of useful materials on keeping your secrets safe when using Terraform:
+- https://developer.hashicorp.com/terraform/cloud-docs/architectural-details/security-model
+- https://developer.hashicorp.com/terraform/tutorials/secrets/secrets-vault
+- https://developer.hashicorp.com/terraform/language/state/sensitive-data
+
+Read more on Snowflake's password protection: https://docs.snowflake.com/en/user-guide/leaked-password-protection.
+
+## Table of contents
+
+* [Protecting secret values](#protecting-secret-values)
+* [Snowflake authenticator flow (login + password)](#snowflake-authenticator-flow-login--password)
+* [PAT (Personal Access Token)](#pat-personal-access-token)
+* [JWT authenticator flow](#jwt-authenticator-flow)
+  * [Private key format](#private-key-format)
+  * [JWT authenticator flow using passphrase](#jwt-authenticator-flow-using-passphrase)
+* [MFA authenticator flow](#mfa-authenticator-flow)
+  * [MFA token caching](#mfa-token-caching)
+* [Okta authenticator flow](#okta-authenticator-flow)
+* [OAuth Client Credentials authenticator flow](#oauth-client-credentials-authenticator-flow)
+* [OAuth Authorization Code authenticator flow - External IdP](#oauth-authorization-code-authenticator-flow---external-idp)
+* [OAuth Authorization Code authenticator flow - Snowflake IdP](#oauth-authorization-code-authenticator-flow---snowflake-idp)
+* [Workload Identity Federation (WIF) authenticator flow](#workload-identity-federation-wif-authenticator-flow)
+* [Common issues](#common-issues)
+  * [How can I get my organization name?](#how-can-i-get-my-organization-name)
+  * [How can I get my account name?](#how-can-i-get-my-account-name)
+  * [Error: key is not in PEM format](#error-key-is-not-in-pem-format)
+  * [Errors similar to (http: 404): open snowflake connection: 261004 (08004): failed to auth for unknown reason.](#errors-similar-to-http-404-open-snowflake-connection-261004-08004-failed-to-auth-for-unknown-reason)
+
+## Authentication flows
+
+### Snowflake authenticator flow (login + password)
+
+Provider setup in this case is pretty straightforward:
+
+```terraform
+provider "snowflake" {
+  organization_name = "<organization_name>"
+  account_name      = "<account_name>"
+  user              = "<user_name>"
+  password          = var.password
+}
+
+variable "password" {
+  type      = string
+  sensitive = true
+}
+```
+
+You can then set Terraform variables like:
+- If a variable does not have any value set, you will be prompted by Terraform to provide the value.
+- Use Terraform VAR environment variables: `TF_VAR_password="<key>" terraform plan`
+- Use Terraform flags: `terraform plan -var="private_key=<key>"`
+- Use Snowflake Terraform Provider flags: `SNOWFLAKE_PRIVATE_KEY="<key>" terraform plan`
+
+Remember to load `<key>` from a secure location, instead of hardcoding the value.
+
+Without passing any authenticator, we depend on the underlying Go Snowflake driver and Snowflake itself to fill this field out.
+This means that we do not provision the default, and it may change at some point, so if you want to be explicit, you can define Snowflake authenticator like so:
+
+```terraform
+provider "snowflake" {
+  organization_name = "<organization_name>"
+  account_name      = "<account_name>"
+  user              = "<user_name>"
+  password          = var.password
+  authenticator     = "Snowflake"
+}
+
+variable "password" {
+  type      = string
+  sensitive = true
+}
+```
+
+### PAT (Personal Access Token)
+
+You must fulfill the following prerequisites to generate and use programmatic access tokens:
+- [Network policy requirements](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens#label-pat-prerequisites-network)
+- [Authentication policy requirements](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens#label-pat-prerequisites-authentication)
+
+#### Managing PATs
+
+Managing the whole PAT lifecycle is implemented in the provider with the [snowflake_programmatic_access_token](../resources/user_programmatic_access_token) resource.
+For example, to create a new PAT, you can use the following code:
+```terraform
+resource "snowflake_user_programmatic_access_token" "example" {
+  user = snowflake_user.user.name
+  name = "TOKEN"
+}
+```
+
+You can also rotate the PAT by using the `keeper` attribute and connecting it to a resource providing changing a value, like [time_rotating](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/rotating) resource from the `time` provider.
+See the example setup below.
+
+```terraform
+# note this requires the terraform to be run regularly
+resource "time_rotating" "rotation_schedule" {
+  rotation_days = 30
+}
+
+resource "snowflake_user_programmatic_access_token" "example" {
+  user = snowflake_user.user.name
+  name = "TOKEN"
+
+  # Use the keeper field to force token rotation. If, and only if, the value changes
+  # from a non-empty to a different non-empty value, the token will be rotated.
+  # When you add this key or remove this key from the config, the token will not be rotated.
+  # When the token is rotated, the `token` and `rotated_token_name` fields are marked as computed.
+  keeper = time_rotating.rotation_schedule.rotation_rfc3339
+}
+```
+Note that in this example, the rotation occurs only when you execute a `terraform apply` command.
+After 30 days pass, you will see a plan output similar to:
+```
+time_rotating.rotation_schedule: Refreshing state... [id=2025-07-22T08:06:51Z]
+snowflake_user_programmatic_access_token.complete_with_external_references: Refreshing state... [id="PAT"|"TOKEN"]
+
+Note: Objects have changed outside of Terraform
+
+Terraform detected the following changes made outside of Terraform since the last "terraform apply" which may have affected this plan:
+
+  # time_rotating.rotation_schedule has been deleted
+  - resource "time_rotating" "rotation_schedule" {
+        id               = "2025-07-22T08:06:51Z"
+      - rfc3339          = "2025-07-22T08:06:51Z" -> null
+        # (9 unchanged attributes hidden)
+    }
+
+
+Unless you have made equivalent changes to your configuration, or ignored the relevant attributes using ignore_changes, the following plan may include actions to undo or respond to
+these changes.
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place
+
+Terraform will perform the following actions:
+
+  # snowflake_user_programmatic_access_token.complete_with_external_references will be updated in-place
+  ~ resource "snowflake_user_programmatic_access_token" "complete_with_external_references" {
+        id                                        = "\"PAT\"|\"TOKEN\""
+      ~ keeper                                    = "2025-07-22T08:06:51Z" -> (known after apply)
+        name                                      = "TOKEN"
+      + rotated_token_name                        = (known after apply)
+      ~ token                                     = (sensitive value)
+        # (8 unchanged attributes hidden)
+    }
+
+  # time_rotating.rotation_schedule will be created
+  + resource "time_rotating" "rotation_schedule" {
+      + day              = 30
+      + hour             = (known after apply)
+      + id               = (known after apply)
+      + minute           = (known after apply)
+      + month            = (known after apply)
+      + rfc3339          = (known after apply)
+      + rotation_minutes = (known after apply)
+      + rotation_rfc3339 = (known after apply)
+      + second           = (known after apply)
+      + unix             = (known after apply)
+      + year             = (known after apply)
+    }
+
+Plan: 1 to add, 1 to change, 0 to destroy.
+```
+
+If you do not want to manage PATs in Terraform, you can simply use a special [ALTER USER](https://docs.snowflake.com/en/sql-reference/sql/alter-user-add-programmatic-access-token) command.
+It will generate a new token and return it in the output console.
+
+#### Authenticating with PATs
+
+To use PATs in the provider, you have the following options:
+- Follow the [user + password](#snowflake-authenticator-flow-login--password) authentication workflow,
+but instead of password, use the generated token.
+- Use the `PROGRAMMATIC_ACCESS_TOKEN` authenticator and pass the generated token in the `token` field, like:
+```terraform
+provider "snowflake" {
+  organization_name = "<organization_name>"
+  account_name      = "<account_name>"
+  user              = "<user_name>"
+  authenticator     = "PROGRAMMATIC_ACCESS_TOKEN"
+  token             = var.token
+}
+
+variable "token" {
+  type      = string
+  sensitive = true
+}
+```
+
+See [Snowflake official documentation](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens) for more information on PAT authentication.
+
+### JWT authenticator flow
+
+To use JWT authentication, you have to firstly generate key-pairs used by Snowflake.
+To correctly generate the necessary keys, follow [this guide](https://docs.snowflake.com/en/user-guide/key-pair-auth#configuring-key-pair-authentication) from the official Snowflake documentation.
+After you [set the generated public key](https://docs.snowflake.com/en/user-guide/key-pair-auth#assign-the-public-key-to-a-snowflake-user) to the Terraform user and [verify it](https://docs.snowflake.com/en/user-guide/key-pair-auth#verify-the-user-s-public-key-fingerprint),
+you can proceed with the following provider configuration:
+
+```terraform
+provider "snowflake" {
+  organization_name = "<organization_name>"
+  account_name      = "<account_name>"
+  user              = "<user_name>"
+  authenticator     = "SNOWFLAKE_JWT"
+  private_key       = file("~/.ssh/snowflake_private_key.p8")
+}
+
+# Or supply the key via a Terraform variable instead of file():
+# private_key = var.private_key
+#
+# variable "private_key" {
+#   type      = string
+#   sensitive = true
+# }
+```
+
+#### Private key format
+
+The `private_key` value (and `SNOWFLAKE_PRIVATE_KEY`) must be a PEM-encoded RSA private key with **literal newlines**.
+The provider does not transform the input; it is passed as-is to the standard library PEM decoder.
+Escaped newline sequences (`\n` as two characters) are **not** converted to real newlines and cause `key is not in PEM format`.
+
+Recommended ways to supply the key:
+
+1. Use the built-in [file](https://developer.hashicorp.com/terraform/language/functions/file) function (preferred):
+```terraform
+private_key = file("~/.ssh/snowflake_private_key.p8")
+```
+If parsing fails when using `file()`, check for an extra blank line at the end of the key file (common with some OpenSSL outputs) and remove it.
+
+2. Source from an environment variable, preserving real newlines:
+```shell
+export SNOWFLAKE_PRIVATE_KEY=$(cat ~/.ssh/snowflake_private_key.p8)
+```
+Or set a multiline quoted string with literal line breaks (not recommended for production; prefer a file or secret store):
+```shell
+export SNOWFLAKE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDAr1xap9HA6Anx
+...
+qXcroyYiKfMLzlt+WYqk4qs5
+-----END PRIVATE KEY-----"
+```
+
+3. Use a TOML configuration file (literal newlines inside the string value):
+```toml
+[default]
+private_key = """
+-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+"""
+```
+
+4. Fill the key inline with [heredoc / multi-line string notation](https://developer.hashicorp.com/terraform/language/expressions/strings#heredoc-strings).
+
+On a local shell, if you already have an escaped single-line key, convert it before exporting:
+```shell
+export SNOWFLAKE_PRIVATE_KEY=$(echo "$SNOWFLAKE_PRIVATE_KEY" | sed 's/\\n/\'$'\n/g')
+```
+
+In case of any other issues, take a look at related topics:
+- https://github.com/snowflakedb/terraform-provider-snowflake/issues/3332#issuecomment-2618957814
+- https://github.com/snowflakedb/terraform-provider-snowflake/issues/3350#issuecomment-2604851052
+- https://github.com/snowflakedb/terraform-provider-snowflake/issues/3788
+
+#### JWT authenticator flow using passphrase
+
+If you would like to use key-pair utilizing passphrase, you can add it to the configuration like so:
+
+```terraform
+provider "snowflake" {
+  organization_name      = "<organization_name>"
+  account_name           = "<account_name>"
+  user                   = "<user_name>"
+  authenticator          = "SNOWFLAKE_JWT"
+  private_key            = file("~/.ssh/snowflake_private_key.p8")
+  private_key_passphrase = var.private_key_passphrase
+}
+
+variable "private_key_passphrase" {
+  type      = string
+  sensitive = true
+}
+```
+
+### MFA authenticator flow
+
+Before being able to log in with MFA method, you have to prepare your Terraform user by following [this guide](https://docs.snowflake.com/en/user-guide/security-mfa) in the official Snowflake documentation.
+Once MFA is set up on your Terraform user, you can use one of the following configurations.
+Choosing the configuration depends on the preferred confirmation method (push notification or passcode) and the one that is available (not always both options are available).
+
+The configuration that uses push notification:
+
+```terraform
+provider "snowflake" {
+  organization_name = "<organization_name>"
+  account_name      = "<account_name>"
+  user              = "<user_name>"
+  password          = var.password
+  authenticator     = "UsernamePasswordMFA"
+}
+
+variable "password" {
+  type      = string
+  sensitive = true
+}
+```
+
+and the configuration that uses passcode:
+
+```terraform
+provider "snowflake" {
+  organization_name = "<organization_name>"
+  account_name      = "<account_name>"
+  user              = "<user_name>"
+  password          = var.password
+  authenticator     = "UsernamePasswordMFA"
+  passcode          = "000000"
+}
+
+variable "password" {
+  type      = string
+  sensitive = true
+}
+```
+
+#### MFA token caching
+
+MFA token caching can help to reduce the number of prompts that must be acknowledged while connecting and authenticating to Snowflake, especially when multiple connection attempts are made within a relatively short time interval.
+Follow [this guide](https://docs.snowflake.com/en/user-guide/security-mfa#using-mfa-token-caching-to-minimize-the-number-of-prompts-during-authentication-optional) to enable it.
+
+### Okta authenticator flow
+
+To set up a new Okta account for this flow, follow [this guide](https://github.com/snowflakedb/terraform-provider-snowflake/blob/b863d2e79ae6ae021552c4348e3012b8053ede17/pkg/manual_tests/authentication_methods/README.md#okta-authenticator-test).
+If you already have an Okta account, skip the first point and follow the next steps.
+The guide includes writing the provider configuration in the TOML file, but here's what it should look like fully in HCL:
+
+```terraform
+provider "snowflake" {
+  organization_name = "<organization_name>"
+  account_name      = "<account_name>"
+  user              = "<user_name>"
+  password          = var.password
+  authenticator     = "Okta"
+  okta_url          = "https://dev-123456.okta.com"
+}
+
+variable "password" {
+  type      = string
+  sensitive = true
+}
+```
+
+### OAuth Client Credentials authenticator flow
+
+To set up a new Okta account for this flow, follow [this guide](https://docs.snowflake.com/en/user-guide/oauth-okta). You can also setup other OAuth providers.
+If you already have an Okta account and the security integration, skip the first point and follow the next steps.
+
+!> **Note** In Okta, the auth scope is case sensitive. This means that the casing in role configuration in the provider, and the allowed scope in Okta setup must match.
+
+The guide includes writing the provider configuration in the TOML file, but here's what it should look like fully in HCL:
+
+```terraform
+provider "snowflake" {
+  organization_name       = "<organization_name>"
+  account_name            = "<account_name>"
+  role                    = "PUBLIC"
+  authenticator           = "OAUTH_CLIENT_CREDENTIALS"
+  oauth_client_id         = var.oauth_client_id
+  oauth_client_secret     = var.oauth_client_secret
+  oauth_token_request_url = var.oauth_token_request_url
+}
+
+# Client ID from the Okta application.
+variable "oauth_client_id" {
+  type      = string
+  sensitive = true
+}
+
+# Client Secret from the Okta application.
+variable "oauth_client_secret" {
+  type      = string
+  sensitive = true
+}
+
+# Client Token Request URL from the Okta API Authorization Server.
+variable "oauth_token_request_url" {
+  type      = string
+  sensitive = true
+}
+```
+
+### OAuth Authorization Code authenticator flow - External IdP
+
+To set up a new Okta account for this flow, follow [this guide](https://docs.snowflake.com/en/user-guide/oauth-okta) with the changes listed below. You can also setup other OAuth providers.
+- Set the grant types as `Authorization Code`, `Refresh Token` and `Resource Owner Password` in application.
+- Set the grant types as `Authorization Code`, and `Resource Owner Password` in the API access policy rule.
+- Use Okta URL issue instead of Dynamic.
+If you already have an Okta account and the security integration, skip the first point and follow the next steps.
+
+!> **Note** In Okta, the auth scope is case sensitive. This means that the casing in role configuration in the provider, and the allowed scope in Okta setup must match.
+
+The TF configuration should look like this:
+```terraform
+provider "snowflake" {
+  organization_name       = "<organization_name>"
+  account_name            = "<account_name>"
+  user                    = "<user_name>" # Must match the login name in Snowflake and the login name in Okta.
+  role                    = "PUBLIC"
+  authenticator           = "OAUTH_AUTHORIZATION_CODE"
+  oauth_client_id         = var.oauth_client_id
+  oauth_client_secret     = var.oauth_client_secret
+  oauth_token_request_url = var.oauth_token_request_url
+  oauth_authorization_url = var.oauth_authorization_url
+  oauth_redirect_uri      = "http://localhost:8001"
+  oauth_scope             = "session:role:PUBLIC"
+}
+
+# Client ID from the Okta application.
+variable "oauth_client_id" {
+  type      = string
+  sensitive = true
+}
+
+# Client Secret from the Okta application.
+variable "oauth_client_secret" {
+  type      = string
+  sensitive = true
+}
+
+# Client Token Request URL from the Okta API Authorization Server.
+variable "oauth_token_request_url" {
+  type      = string
+  sensitive = true
+}
+
+# Authorization URL from the Okta API Authorization Server.
+variable "oauth_authorization_url" {
+  type      = string
+  sensitive = true
+}
+```
+
+Please also see our [manual tests examples](https://github.com/snowflakedb/terraform-provider-snowflake/tree/main/pkg/manual_tests/authentication_methods) for more details.
+
+### OAuth Authorization Code authenticator flow - Snowflake IdP
+
+To set up new Snowflake IdP objects for this flow, follow [this guide](https://docs.snowflake.com/en/user-guide/oauth-custom).
+You can then use [SYSTEM$SHOW_OAUTH_CLIENT_SECRETS](https://docs.snowflake.com/en/sql-reference/functions/system_show_oauth_client_secrets) to get `oauth_client_id` and `oauth_client_secret`.
+
+The TF configuration should look like this:
+```terraform
+provider "snowflake" {
+  organization_name       = "<organization_name>"
+  account_name            = "<account_name>"
+  user                    = "<user_name>"
+  authenticator           = "OAUTH_AUTHORIZATION_CODE"
+  oauth_client_id         = var.oauth_client_id
+  oauth_client_secret     = var.oauth_client_secret
+  oauth_token_request_url = var.oauth_token_request_url
+  oauth_authorization_url = var.oauth_authorization_url
+  oauth_redirect_uri      = "http://localhost:8001" # Make sure this value is the same as OAUTH_REDIRECT_URI in the Oauth security integration.
+  oauth_scope             = "session:role:PUBLIC"
+}
+
+# Client ID from the SHOW_OAUTH_CLIENT_SECRETS output.
+variable "oauth_client_id" {
+  type      = string
+  sensitive = true
+}
+
+# Client Secret from the SHOW_OAUTH_CLIENT_SECRETS output.
+variable "oauth_client_secret" {
+  type      = string
+  sensitive = true
+}
+
+# Authorization URL. It should be in format <account_url>/oauth/authorize.
+variable "oauth_authorization_url" {
+  type      = string
+  sensitive = true
+}
+
+# Token request URL. It should be in format <account_url>/oauth/token-request.
+variable "oauth_token_request_url" {
+  type      = string
+  sensitive = true
+}
+```
+
+Please also see our [manual tests examples](https://github.com/snowflakedb/terraform-provider-snowflake/tree/main/pkg/manual_tests/authentication_methods) for more details.
+
+
+### Workload Identity Federation (WIF) authenticator flow
+
+To setup WIF authentication, follow [this guide](https://docs.snowflake.com/user-guide/workload-identity-federation)
+in the official Snowflake documentation.
+
+Please also see our [manual tests examples](https://github.com/snowflakedb/terraform-provider-snowflake/tree/main/pkg/manual_tests/authentication_methods) for more details.
+
+The TF configuration should e.g. look like this:
+
+```terraform
+provider "snowflake" {
+  organization_name                = "<organization_name>"
+  account_name                     = "<account_name>"
+  user                             = "<user_name>"
+  authenticator                    = "WORKLOAD_IDENTITY"
+  workload_identity_provider       = "<workload_identity_provider>"
+}
+```
+
+With the optional parameter `workload_identity_entra_resource` the resource to use for WIF authentication
+on an Azure environment can be controlled.
+
+For the case of [Authenticate to Snowflake using OpenID Connect (OIDC) issuer from Elastic Kubernetes Service (EKS)](https://docs.snowflake.com/user-guide/workload-identity-federation#authenticate-to-snowflake-using-openid-connect-oidc-issuer-from-aws-kubernetes)
+the token from the token file is needed, which is stored at `token_file_path` (the exact path may vary depending on the setup).
+
+
+```terraform
+provider "snowflake" {
+  organization_name                = "<organization_name>"
+  account_name                     = "<account_name>"
+  user                             = "<user_name>"
+  authenticator                    = "WORKLOAD_IDENTITY"
+  workload_identity_provider       = "OIDC"
+  token                            = file("<token_file_path>")
+}
+```
+
+Alternatively, the token can be provided with the environment variable `SNOWFLAKE_TOKEN` (must be set before running Terraform):
+
+```bash
+export SNOWFLAKE_TOKEN=$(cat <token_file_path>)
+```
+
+`token = file(...)` and `SNOWFLAKE_TOKEN` are read once, when Terraform loads the configuration. For a run that outlives the token, set `token_file_path` instead. The driver re-reads that file on every new connection, so a sidecar can refresh a short-lived token during a long apply:
+
+```terraform
+provider "snowflake" {
+  organization_name          = "<organization_name>"
+  account_name               = "<account_name>"
+  user                       = "<user_name>"
+  authenticator              = "WORKLOAD_IDENTITY"
+  workload_identity_provider = "OIDC"
+  token_file_path            = "<token_file_path>"
+}
+```
+
+The same field is what OAuth and programmatic access token authentication read, and AWS, GCP, and Azure workload identity ignore it. `token` and `token_file_path` cannot be set together, including when `token` comes from a TOML profile or from `SNOWFLAKE_TOKEN`. The path can also be set with `SNOWFLAKE_TOKEN_FILE_PATH` or with `token_file_path` in the TOML configuration file.
+
+#### Using a Terraform Cloud/Enterprise workload identity token
+
+Terraform Cloud and Terraform Enterprise can issue OIDC workload identity tokens for a workspace and
+expose them to the run through environment variables named `TFC_WORKLOAD_IDENTITY_TOKEN_<TAG>`, where
+`<TAG>` is the tag you configured for the token. See HashiCorp's guide to
+[manually generating workload identity tokens](https://developer.hashicorp.com/terraform/enterprise/workspaces/dynamic-provider-credentials/manual-generation)
+for how to set this up on the TFC/TFE side.
+
+Set `tfc_workload_identity_token_tag` to that tag and the provider reads the JWT from the matching
+environment variable and uses it for the OIDC workload identity flow. For example, the tag `SNOWFLAKE`
+below makes the provider read `TFC_WORKLOAD_IDENTITY_TOKEN_SNOWFLAKE`:
+
+```terraform
+provider "snowflake" {
+  organization_name               = "<organization_name>"
+  account_name                    = "<account_name>"
+  user                            = "<user_name>"
+  authenticator                   = "WORKLOAD_IDENTITY"
+  workload_identity_provider      = "OIDC"
+  tfc_workload_identity_token_tag = "SNOWFLAKE"
+}
+```
+
+Because TFC/TFE can issue tokens with different claims for the plan and the apply phase, this lets you
+back each phase with a different Snowflake user - for example a read-only identity for `terraform plan`
+and a read/write one for `terraform apply` - enforced by Snowflake through
+[workload identity federation](https://docs.snowflake.com/user-guide/workload-identity-federation)
+rather than by the pipeline.
+
+Notes:
+- The tag is upper-cased before the environment variable name is built, so `tfc_workload_identity_token_tag = "snowflake"` also reads `TFC_WORKLOAD_IDENTITY_TOKEN_SNOWFLAKE`.
+- The resulting token takes precedence over a token from any other source, including the `token` field, `token_file_path`, the `SNOWFLAKE_TOKEN` environment variable, and a TOML profile.
+- The field requires `authenticator = "WORKLOAD_IDENTITY"` and `workload_identity_provider = "OIDC"`. Any other combination is an error, so that a misconfiguration is not silently ignored.
+- The untagged `TFC_WORKLOAD_IDENTITY_TOKEN` environment variable is not read. Configure a tagged token instead.
+- The tag itself can also be sourced from the `SNOWFLAKE_TFC_WORKLOAD_IDENTITY_TOKEN_TAG` environment variable. It cannot be set in the TOML configuration file, because TFC/TFE runs configure the provider through the Terraform configuration and the environment.
+
+## Common issues
+
+### How can I get my organization name?
+
+If you are logged into account that is in the same organization as Terraform user (or logged in as Terraform user), you can run:
+```snowflake
+SELECT CURRENT_ORGANIZATION_NAME();
+```
+The output of this command is your `<organization_name>`.
+
+### How can I get my account name?
+
+If you are logged into as a user that is in the same account as Terraform user (or logged in as Terraform user), you can run:
+```snowflake
+SELECT CURRENT_ACCOUNT_NAME();
+```
+The output of this command is your `<account_name>`.
+
+### Error: key is not in PEM format
+
+```text
+Error: could not retrieve private key: could not parse private key, key is not in PEM format
+```
+
+Typical causes:
+
+- The key uses escaped newlines (`\n`) instead of literal line breaks — common when pasting into HCP Terraform environment variables. Use a multiline Terraform variable, `file()`, or a shell export that preserves real newlines. See [Private key format](#private-key-format) and [#3788](https://github.com/snowflakedb/terraform-provider-snowflake/issues/3788).
+- An extra blank line at the end of the key file when using `file()` or `$(cat ...)`.
+- Missing `-----BEGIN ...-----` / `-----END ...-----` headers, or a public key supplied instead of a private key.
+
+## General recommendations
+
+### Be sure you are passing all the required fields
+
+This point is not only referring to double-checking the fields you are passing, but also to inform you that depending on the account
+you want to log into, a different set of parameters may be required.
+
+Whenever you are on a Snowflake deployment that has different url than the default one:
+`<organization_name>-<account_name>.snowflakecomputing.com`, you may encounter errors similar to:
+
+```text
+open snowflake connection: 261004 (08004): failed to auth for unknown reason.
+```
+
+This error can be raised for a number of reasons, but explicitly specifying the host has effectively prevented such occurrences so far.

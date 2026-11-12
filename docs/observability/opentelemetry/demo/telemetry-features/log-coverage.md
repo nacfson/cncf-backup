@@ -1,0 +1,38 @@
+---
+title: Log Coverage by Service
+linkTitle: Log Coverage
+aliases: [log_service_features, logging-features, ../logging-features]
+---
+
+| Service         | Language   | OTLP Logs |
+| --------------- | ---------- | --------- |
+| Accounting      | .NET       | ✅        |
+| Ad              | Java       | ✅        |
+| Agent           | Python     | 🚧        |
+| Cart            | .NET       | ✅        |
+| Chatbot         | Python     | 🚧        |
+| Checkout        | Go         | ✅        |
+| Currency        | C++        | ✅        |
+| Email           | Ruby       | ✅        |
+| Flagd           | Go         | 🚧        |
+| Flagd-ui        | Elixir     | 🚧        |
+| Fraud Detection | Kotlin     | ✅        |
+| Frontend        | TypeScript | ✅        |
+| Frontend Proxy  | Envoy      | ✅        |
+| Image Provider  | NGINX      | 🚧        |
+| Load Generator  | Python     | ✅        |
+| MCP             | Python     | 🚧        |
+| Payment         | JavaScript | ✅        |
+| Product Catalog | Go         | ✅        |
+| Quote           | PHP        | ✅        |
+| Recommendation  | Python     | ✅        |
+| Shipping        | Rust       | ✅        |
+
+Frontend log coverage applies to the server (`frontend`). The browser
+instrumentation (`frontend-web`) does not export OTLP logs.
+
+Emoji Legend:
+
+- Completed: ✅
+- Not Applicable: 🔕
+- Not Present (Yet): 🚧

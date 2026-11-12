@@ -1,0 +1,390 @@
+---
+title: Migrating to CEL Policies
+weight: 10
+excerpt: Complete guide for migrating from `ClusterPolicy` to CEL-based policy types
+---
+
+This guide helps you migrate from `ClusterPolicy` to the new CEL-based [policy types](/docs/policy-types/overview/).
+
+:::caution[Deprecation Notice]
+`ClusterPolicy`, `Policy`, `CleanupPolicy`, and the legacy `kyverno.io` PolicyException are deprecated as of Kyverno v1.19 and will be **removed in v1.20**. The CEL-based policy types provide full feature parity as of v1.19. Plan your migration now — see the [deprecation schedule](https://release-1-18-0.kyverno.io/docs/policy-types/overview#deprecation-schedule-for-legacy-types).
+:::
+
+:::note[Tip]
+Use `kubectl explain cpol.spec` for help on the ClusterPolicy schema.
+
+- `kubectl explain vpol.spec` for ValidatingPolicy schema
+- `kubectl explain mpol.spec` for MutatingPolicy schema
+- `kubectl explain gpol.spec` for GeneratingPolicy schema
+- `kubectl explain dpol.spec` for DeletingPolicy schema
+- `kubectl explain ivpol.spec` for ImageValidaingPolicy schema
+  :::
+
+## Key Differences
+
+**ClusterPolicy Structure**
+
+A ClusterPolicy contains an [orderered list of rules](https://release-1-18-0.kyverno.io/docs/policy-types/cluster-policy/overview/) and [common settings](https://release-1-18-0.kyverno.io/docs/policy-types/cluster-policy/policy-settings/).
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-labels
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-labels
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: 'Required labels missing'
+        pattern:
+          metadata:
+            labels:
+              app: '?*'
+              version: '?*'
+```
+
+**CEL-based Policy Structure**
+
+Kyverno CEL-based policies are defined as discrete types where each policy is focused on a single action e.g., validate, mutate, generate, or cleanup. Each CEL-based policy can contain an ordered list of actions of the same type, e.g. `spec.validations`.
+
+```yaml
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-app-version-labels
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ''
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+  validationActions:
+    - Deny
+  validations:
+    - expression: >
+        ['app', 'version'].all(label, 
+          object.metadata.?labels[label].orValue('') != ''
+        )
+      message: 'Required labels missing'
+```
+
+## Policy Settings
+
+Here is a mapping of each ClusterPolicy field to the CEL-based equivalent:
+
+**Common Fields**
+
+| **ClusterPolicy**                             | **CEL-based policies**                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------ |
+| **spec.admission**                            | `spec.evaluation.admission.enabled`                                      |
+| **applyRules**                                | not applicable; convert each rule to a policy and use `matchConditions`. |
+| **spec.background**                           | `spec.evaluation.background.enabled`                                     |
+| **spec.emitWarning**                          | `spec.validationActions: Warn`                                           |
+| **spec.useServerSideApply**                   | See: [#14853](https://github.com/kyverno/kyverno/issues/14853)           |
+| **spec.webhookConfiguration.failurePolicy**   | `spec.failurePolicy`                                                     |
+| **spec.webhookConfiguration.matchConditions** | `spec.matchConditions`                                                   |
+| **spec.webhookConfiguration.timeoutSeconds**  | `spec.webhookConfiguration.timeoutSeconds`                               |
+
+**Rule Fields**
+
+| **ClusterPolicy**                     | **CEL-based policies**                                         |
+| ------------------------------------- | -------------------------------------------------------------- |
+| **spec.rules.match**                  | `spec.matchExpressions` and `spec.matchConditions`             |
+| **spec.rules.exclude**                | `spec.matchConstraints.excludeResourceRules`                   |
+| **spec.rules.context**                | `spec.variables`                                               |
+| **spec.rules.preconditions**          | `spec.matchConditions`                                         |
+| **spec.rules.celPreconditions**       | `spec.matchConditions`                                         |
+| **spec.rules.skipBackgroundRequests** | See: [#14852](https://github.com/kyverno/kyverno/issues/14852) |
+| **spec.rules.reportProperties**       | `spec.auditAnnotations`                                        |
+| **spec.rules.validate**               | `ValidatingPolicy`                                             |
+| **spec.rules.mutate**                 | `MutatingPolicy`                                               |
+| **spec.rules.generate**               | `GeneratingPolicy`                                             |
+| **spec.rules.imageExtactors**         | `variables.expressions`                                        |
+| **spec.rules.verifyImages**           | `ImageValidatingPolicy`                                        |
+
+## Validate Rule
+
+| **ClusterPolicy**                               | **CEL-based policies**                                                              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **spec.rules.validate.allowExistingViolations** | not supported; use policy exceptions instead                                        |
+| **spec.rules.validate.anyPattern**              | `spec.validations`                                                                  |
+| **spec.rules.validate.cel**                     | `spec.validations`                                                                  |
+| **spec.rules.validate.deny**                    | `spec.validations` and invert the logic                                             |
+| **spec.rules.validate.failureAction**           | `spec.validationActions`                                                            |
+| **spec.rules.validate.failureActionOverrides**  | not supported; use policy exceptions instead                                        |
+| **spec.rules.validate.foreach**                 | `spec.validations` with CEL comprehensions like `all()`, `exists()`, `exists_one()` |
+| **spec.rules.validate.manifests**               | Not supported                                                                       |
+| **spec.rules.validate.message**                 | `spec.validations.message` or `spec.validations.messageExpression`                  |
+| **spec.rules.validate.pattern**                 | `spec.validations`                                                                  |
+| **spec.rules.validate.podSecurity**             | Not supported; use `spec.validations` for each pod security control                 |
+
+**ClusterPolicy validate pattern:**
+
+```yaml
+validate:
+  pattern:
+    spec:
+      containers:
+        - name: '*'
+          image: '!*:latest'
+```
+
+**ValidatingPolicy:**
+
+```yaml
+validations:
+  - expression: >
+      ['app', 'version'].all(label, 
+        object.metadata.?labels[label].orValue('') != ''
+      )
+    message: "Pod must have an 'app' and 'version' labels"
+```
+
+**ClusterPolicy validate deny**
+
+```yaml
+validate:
+  deny:
+    conditions:
+      all:
+        - key: '{{ request.object.spec.replicas }}'
+          operator: GreaterThan
+          value: 10
+  message: 'Replica count cannot exceed 10'
+```
+
+**ValidatingPolicy:**
+
+Note the logic innversion when converting a `deny` rule to a CEL expression:
+
+```yaml
+validate:
+  cel:
+    expressions:
+      - expression: 'object.spec.replicas <= 10'
+        message: 'Replica count cannot exceed 10'
+```
+
+Refer to the [ValidatingPolicy documentation](/docs/policy-types/validating-policy/) for details and additional examples.
+
+## Mutate Rule
+
+| **ClusterPolicy**                         | **CEL-based policies**                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------------------------- |
+| **spec.rules.mutate.foreach**             | CEL comprehensions e.g., `all()`, `exists()`, `exists_one()`                        |
+| **spec.rules.mutate.mutateExisting**      | `spec.evaluation.mutateExisting.enabled`                                            |
+| **spec.rules.mutate.patchStrategicMerge** | not supported; convert to `patchType: ApplyConfiguration` or `patchType: JSONPatch` |
+| **spec.rules.mutate.patchesJson6902**     | `patchType: JSONPatch`                                                              |
+| **spec.rules.mutate.targets**             | `spec.matchConstraints` or `spec.targetMatchConstraints`                            |
+
+Refer to the [MutatingPolicy documentation](/docs/policy-types/mutating-policy/) for details and examples.
+
+## Generate Rule
+
+| **ClusterPolicy**                                      | **CEL-based policies**                           |
+| ------------------------------------------------------ | ------------------------------------------------ |
+| **spec.rules.generate.apiVersion**                     | CEL expressions                                  |
+| **spec.rules.generate.clone**                          | CEL expressions                                  |
+| **spec.rules.generate.cloneList**                      | CEL expressions                                  |
+| **spec.rules.generate.data**                           | CEL expressions                                  |
+| **spec.rules.generate.foreach**                        | CEL expressions                                  |
+| **spec.rules.generate.generateExisting**               | `spec.evaluation.generateExisting`               |
+| **spec.rules.generate.kind**                           | CEL expressions                                  |
+| **spec.rules.generate.name**                           | CEL expressions                                  |
+| **spec.rules.generate.namespace**                      | CEL expressions                                  |
+| **spec.rules.generate.orphanDownstreamOnPolicyDelete** | `spec.evaluation.orphanDownstreamOnPolicyDelete` |
+| **spec.rules.generate.synchronize**                    | `spec.evaluation.synchronize`                    |
+
+A number of the GeneratingPolicy fields, such as the generated resource properties, are now directly handled as CEL expressions. See [GeneratingPolicy docs](/docs/policy-types/generating-policy/) for details.
+
+## Verify Images Rule
+
+| **ClusterPolicy**                                    | **CEL-based policies**                                 |
+| ---------------------------------------------------- | ------------------------------------------------------ |
+| **spec.rules.verifyImages.imageReferences**          | `spec.matchImageReferences`                            |
+| **spec.rules.verifyImages.skipImageReferences**      | `spec.matchImageReferences` with CEL expressions       |
+| **spec.rules.verifyImages.type**                     | `spec.attestors[].cosign` or `spec.attestors[].notary` |
+| **spec.rules.verifyImages.attestors**                | `spec.attestors`                                       |
+| **spec.rules.verifyImages.attestations**             | `spec.attestations` and `spec.validations`             |
+| **spec.rules.verifyImages.imageRegistryCredentials** | `spec.credentials`                                     |
+| **spec.rules.verifyImages.mutateDigest**             | `spec.validationConfigurations.mutateDigest`           |
+| **spec.rules.verifyImages.verifyDigest**             | `spec.validationConfigurations.verifyDigest`           |
+| **spec.rules.verifyImages.required**                 | `spec.validationConfigurations.required`               |
+| **spec.rules.imageExtractors**                       | `spec.images`                                          |
+
+Refer to the [ImageValidatingPolicy documentation](/docs/policy-types/image-validating-policy/) for details and examples.
+
+## CleanupPolicy
+
+| **CleanupPolicy**                  | **CEL-based policies**                             |
+| ---------------------------------- | -------------------------------------------------- |
+| **spec.conditions**                | `spec.matchConstraints` and `spec.matchConditions` |
+| **spec.context**                   | `spec.variables`                                   |
+| **spec.deletionPropagationPolicy** | `spec.deletionPropagationPolicy`                   |
+| **spec.exclude**                   | `spec.matchConstraints.excludeResourceRules`       |
+| **spec.match**                     | `spec.matchConstraints` and `spec.matchConditions` |
+| **spec.schedule**                  | `spec.schedule`                                    |
+
+Refer to the [DeletingPolicy documentation](/docs/policy-types/deleting-policy/) for details and examples.
+
+## PolicyException
+
+The legacy `kyverno.io` PolicyException must be migrated to the `policies.kyverno.io` PolicyException, which works with the CEL-based policy types:
+
+| **Legacy PolicyException (`kyverno.io`)** | **PolicyException (`policies.kyverno.io`)**             |
+| ----------------------------------------- | ------------------------------------------------------- |
+| **spec.exceptions.policyName**            | `spec.policyRefs.name`                                  |
+| **spec.exceptions.ruleNames**             | not applicable; CEL policies do not contain named rules |
+| **spec.match**                            | `spec.matchConditions`                                  |
+| **spec.conditions**                       | `spec.matchConditions`                                  |
+| **spec.podSecurity**                      | `spec.matchConditions` with CEL expressions             |
+
+```yaml
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: allow-team-tool
+  namespace: delta
+spec:
+  policyRefs:
+    - name: disallow-host-namespaces
+      kind: ValidatingPolicy
+  matchConditions:
+    - name: match-pod-name
+      expression: object.metadata.name.startsWith('important-tool')
+```
+
+Refer to the [Policy Exceptions guide](/docs/guides/exceptions/) for details and examples.
+
+## Context Variables
+
+| Traditional Kyverno        | CEL Equivalent              | Description                             |
+| -------------------------- | --------------------------- | --------------------------------------- |
+| `{{ request.object }}`     | `object`                    | The resource being validated            |
+| `{{ request.oldObject }}`  | `oldObject`                 | Previous version (for updates)          |
+| `{{ request.operation }}`  | `request.operation`         | Operation type (CREATE, UPDATE, DELETE) |
+| `{{ serviceAccountName }}` | `request.userInfo.username` | Service account name                    |
+| `{{ request.namespace }}`  | `object.metadata.namespace` | Resource namespace                      |
+
+## Testing
+
+You can use the Kyverno CLI to validate the policy syntax:
+
+```bash
+# Test with a sample resource
+kyverno apply validating-policy.yaml --resource test-pod.yaml
+```
+
+Alternatively, you can use the [Kyverno Playground](https://playground.kyverno.io/).
+
+If you have existing [Kyverno CLI tests](/docs/kyverno-cli/reference/kyverno_test), you can use them with the new policy with no changes, and validate it works as expected.
+
+If you have existing [Kyverno Chainsaw](/docs/subprojects/chainsaw/) tests, any policy type and status checks will need to be converted. The rest of the test logic can be reused.
+
+## Detecting Legacy Policy Usage
+
+Starting with Kyverno v1.19, the admission controller and the Kyverno CLI emit deprecation warnings to help you find remaining legacy policies before they are removed.
+
+**Admission Warnings**
+
+When a legacy `kyverno.io` policy type is created or updated, the response includes a warning identifying the replacement type:
+
+```
+Warning: kyverno.io/v1 ClusterPolicy is deprecated and will be removed in a future release; migrate to ValidatingPolicy, MutatingPolicy, GeneratingPolicy or ImageValidatingPolicy (policies.kyverno.io), see https://kyverno.io/docs/guides/migration-to-cel/
+```
+
+Warnings are also returned for deprecated field values, such as the lowercase `enforce`/`audit` validation failure actions:
+
+```
+Warning: spec.validationFailureAction: Validation failure actions enforce/audit are deprecated, use Enforce/Audit instead.
+```
+
+**CLI Warnings**
+
+The [`kyverno apply`](/docs/kyverno-cli/reference/kyverno_apply) and [`kyverno test`](/docs/kyverno-cli/reference/kyverno_test) commands print the same kind-level deprecation warnings when loading legacy policies or policy exceptions (field-level warnings are only emitted by the admission controller). To enforce migration in CI pipelines, add the `--warnings-as-errors` flag to make these commands fail when any deprecation warning is found:
+
+```bash
+kyverno apply /path/to/policy.yaml --resource /path/to/resource.yaml --warnings-as-errors
+kyverno test . --warnings-as-errors
+```
+
+**Tracking Usage with Metrics**
+
+The `kyverno_deprecated_api_requests_total` counter, labeled by `group`, `version`, `kind`, and `field`, tracks admission requests that use deprecated policy types or fields. Use it to confirm that nothing in the cluster still creates or updates legacy policies before upgrading. The `field` label is empty for requests using a deprecated kind; otherwise it identifies the deprecated field, such as `spec.validationFailureAction`.
+
+To count deprecated API requests over the last seven days, grouped by kind and version:
+
+```
+sum(increase(kyverno_deprecated_api_requests_total[7d])) by (kind, version)
+```
+
+The counter only records active requests, so it cannot report legacy policies that already exist but that nobody is currently writing. The `kyverno_legacy_policies_total` gauge, labeled by `group` and `kind`, reports the legacy policy resources present in the cluster at rest and returns to `0` once you migrate or delete them. Use it to answer "have I migrated everything yet?":
+
+```
+sum(kyverno_legacy_policies_total) by (kind)
+```
+
+Alert while any legacy policy remains, so the migration is completed before you upgrade to a release that removes the legacy types:
+
+```
+sum(kyverno_legacy_policies_total) > 0
+```
+
+The gauge is recomputed at scrape time. Its `group` label is `kyverno.io`, and its `kind` label identifies `ClusterPolicy`, `Policy`, `PolicyException`, `CleanupPolicy`, or `ClusterCleanupPolicy`. The admission controller exposes the first three kinds; the cleanup controller exposes the cleanup kinds. The `PolicyException` series requires the admission controller's `--enablePolicyException=true` flag.
+
+**Startup Signals**
+
+When any legacy policy is present, `kyverno-init` (the `kyverno-pre` init container) logs an error and emits a `LegacyPolicyPresent` warning event on the admission controller Deployment as it starts, listing the legacy kinds it still finds and linking to this guide. These signals fire on install, upgrade, or a controller restart. Use the gauge to confirm that no legacy policies remain; the event query below can also show warnings from earlier startup checks until Kubernetes garbage-collects them:
+
+```bash
+kubectl get events -n <kyverno-namespace> --field-selector reason=LegacyPolicyPresent
+```
+
+## Troubleshooting
+
+**CEL Expression Errors**
+
+**Error:** `unknown field 'foo'`
+**Solution:** Use `has()` or `?` to check field existence:
+
+```yaml
+expression: "has(object.metadata.labels) && has(object.metadata.labels.foo) && object.metadata.labels.foo == 'value'"
+```
+
+```yaml
+expression: "object.metadata.?labels.foo.orValue('') == 'value'"
+```
+
+**Error:** `index out of bounds`
+**Solution:** Check array length before accessing:
+
+```yaml
+expression: "size(object.spec.initContainers) > 0 && object.spec.initContainers[0].image != 'bad'"
+```
+
+**Error:** `expression of type 'any' cannot be range of a comprehension (must be list, map, or dynamic)`
+**Solution:** Convert JSON types to `dynamic` using `orValue`
+
+```yaml
+"name": "deploymentList",
+"expression": "resource.List('apps/v1', 'deployments', object.metadata.namespace).items.orValue([])"
+```
+
+## Additional Resources
+
+- [CEL Language Specification](https://github.com/google/cel-spec)
+- [Kyverno CEL Functions Reference](/docs/policy-types/cel-libraries/)
+- [ValidatingPolicy API Reference](/docs/policy-types/validating-policy)
+- [Kyverno CLI Testing Guide](/docs/kyverno-cli/reference/kyverno_test)

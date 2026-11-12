@@ -1,0 +1,225 @@
+---
+title: Raw
+weight: 11
+type: docs
+aliases:
+  - /dev/table/connectors/formats/raw.html
+---
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Raw Format
+
+{{< label "Format: Serialization Schema" >}}
+{{< label "Format: Deserialization Schema" >}}
+
+The Raw format allows to read and write raw (byte based) values as a single column.
+
+Note: this format encodes `null` values as `null` of `byte[]` type. This may have limitation when used in `upsert-kafka`, because `upsert-kafka` treats `null` values as a tombstone message (DELETE on the key). Therefore, we recommend avoiding using `upsert-kafka` connector and the `raw` format as a `value.format` if the field can have a `null` value.
+
+The Raw connector is built-in, no additional dependencies are required.
+
+Example
+----------------
+
+For example, you may have following raw log data in Kafka and want to read and analyse such data using Flink SQL.
+
+```
+47.29.201.179 - - [28/Feb/2019:13:17:10 +0000] "GET /?p=1 HTTP/2.0" 200 5316 "https://domain.com/?p=1" "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.119 Safari/537.36" "2.75"
+```
+
+The following creates a table where it reads from (and can writes to) the underlying Kafka topic as an anonymous string value in UTF-8 encoding by using `raw` format:
+
+```sql
+CREATE TABLE nginx_log (
+  log STRING
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'nginx_log',
+  'properties.bootstrap.servers' = 'localhost:9092',
+  'properties.group.id' = 'testGroup',
+  'format' = 'raw'
+)
+```
+
+Then you can read out the raw data as a pure string, and split it into multiple fields using an user-defined-function for further analysing, e.g. `my_split` in the example.
+
+```sql
+SELECT t.hostname, t.datetime, t.url, t.browser, ...
+FROM(
+  SELECT my_split(log) as t FROM nginx_log
+);
+```
+
+In contrast, you can also write a single column of STRING type into this Kafka topic as an anonymous string value in UTF-8 encoding.
+
+Format Options
+----------------
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left" style="width: 25%">Option</th>
+        <th class="text-center" style="width: 8%">Required</th>
+        <th class="text-center" style="width: 7%">Default</th>
+        <th class="text-center" style="width: 10%">Type</th>
+        <th class="text-center" style="width: 50%">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>format</h5></td>
+      <td>required</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>Specify what format to use, here should be 'raw'.</td>
+    </tr>
+    <tr>
+      <td><h5>raw.charset</h5></td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">UTF-8</td>
+      <td>String</td>
+      <td>Specify the charset to encode the text string.</td>
+    </tr>
+    <tr>
+      <td><h5>raw.endianness</h5></td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">big-endian</td>
+      <td>String</td>
+      <td>Specify the endianness to encode the bytes of numeric value. Valid values are 'big-endian' and 'little-endian'.
+      See more details of <a href="https://en.wikipedia.org/wiki/Endianness">endianness</a>.</td>
+    </tr>
+    <tr>
+      <td><h5>raw.line-delimiter</h5></td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>Specify the line delimiter for splitting incoming messages into multiple rows during
+      deserialization. Only supported for a <code>STRING</code>, <code>VARCHAR</code> or <code>CHAR</code>
+      column. When set, each incoming message is split by this delimiter; one row is emitted
+      per segment. If 'raw.charset' is UTF-8, the message is split on the UTF-8 bytes of the delimiter
+      without being decoded, so each segment keeps its original bytes. Otherwise the message is decoded
+      using 'raw.charset' before it is split.
+      During serialization, the delimiter bytes
+      are appended to each serialized value. Common values are '\n' (newline) or '||'.
+      <br><strong>Note:</strong> When the same delimiter is configured for both serialization and
+      deserialization, the two are round-trip compatible: a trailing delimiter appended by the
+      serializer is automatically stripped during deserialization.</td>
+    </tr>
+    <tr>
+      <td><h5>raw.variant-encoding</h5></td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">json</td>
+      <td>Enum</td>
+      <td>Specify how a <code>VARIANT</code> column is encoded. Valid values are 'json' and 'binary'.
+      'json' reads and writes a UTF-8 JSON document. For convenience, and also because JSON is a very
+      popular and human readable format, the stored VARIANT value is assumed to be JSON. However, JSON
+      values are lossy: JSON has no type for dates, times, timestamps, bytes or
+      UUIDs, and it does not keep the width of a number. 'binary' reads and writes the Variant binary
+      encoding, the metadata followed by the value. It keeps every Variant type and skips JSON parsing
+      and rendering, so use it for correctness and performance. 'raw.charset' does not apply to
+      'binary'.</td>
+    </tr>
+    </tbody>
+</table>
+
+Data Type Mapping
+----------------
+
+The table below details the SQL types the format supports, including details of the serializer and deserializer class for encoding and decoding.
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Flink SQL type</th>
+        <th class="text-left">Value</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><code>CHAR / VARCHAR / STRING</code></td>
+      <td>A UTF-8 (by default) encoded text string.<br>
+       The encoding charset can be configured by 'raw.charset'.</td>
+    </tr>
+    <tr>
+      <td><code>BINARY / VARBINARY / BYTES</code></td>
+      <td>The sequence of bytes itself.</td>
+    </tr>
+    <tr>
+      <td><code>BOOLEAN</code></td>
+      <td>A single byte to indicate boolean value, 0 means false, 1 means true.</td>
+    </tr>
+    <tr>
+      <td><code>TINYINT</code></td>
+      <td>A single byte of the signed number value.</td>
+    </tr>
+    <tr>
+      <td><code>SMALLINT</code></td>
+      <td>Two bytes with big-endian (by default) encoding.<br>
+       The endianness can be configured by 'raw.endianness'.</td>
+    </tr>
+    <tr>
+      <td><code>INT</code></td>
+      <td>Four bytes with big-endian (by default) encoding.<br>
+       The endianness can be configured by 'raw.endianness'.</td>
+    </tr>
+    <tr>
+      <td><code>BIGINT</code></td>
+      <td>Eight bytes with big-endian (by default) encoding.<br>
+       The endianness can be configured by 'raw.endianness'.</td>
+    </tr>
+    <tr>
+      <td><code>FLOAT</code></td>
+      <td>Four bytes with IEEE 754 format and big-endian (by default) encoding.<br>
+       The endianness can be configured by 'raw.endianness'.</td>
+    </tr>
+    <tr>
+      <td><code>DOUBLE</code></td>
+      <td>Eight bytes with IEEE 754 format and big-endian (by default) encoding.<br>
+       The endianness can be configured by 'raw.endianness'.</td>
+    </tr>
+    <tr>
+      <td><code>RAW</code></td>
+      <td>The sequence of bytes serialized by the underlying TypeSerializer of the RAW type.</td>
+    </tr>
+    <tr>
+      <td><code>VARIANT</code></td>
+      <td>Depends on 'raw.variant-encoding'.<br>
+       <strong>json</strong> (default): a UTF-8 encoded JSON document.
+       'raw.charset' must be UTF-8. To read or write JSON in another charset, declare the column as
+       <code>STRING</code> and convert it with <code>PARSE_JSON</code> when reading and <code>JSON_STRING</code>
+       when writing.
+       On read, the bytes are parsed like <code>PARSE_JSON</code> with the same checks, so an invalid UTF-8 byte such as
+       <code>0xFF</code>, a duplicate object key or malformed JSON fails the job. On write, the value is rendered by
+       <code>Variant#toJson</code>.
+       The round trip is lossy, because JSON has fewer types than VARIANT: a <code>DATE</code>, <code>TIME</code>,
+       <code>TIMESTAMP</code>, <code>BYTES</code> or <code>UUID</code> value comes back as a string, a <code>FLOAT</code>
+       or <code>DOUBLE</code> can come back as a <code>DECIMAL</code>, and an integer comes back as the smallest integer
+       type that holds it.
+       Insignificant whitespace is dropped and object keys are ordered.<br>
+       <strong>binary</strong>: the Variant binary encoding, the metadata followed by the value. The round trip keeps
+       every Variant type. The bytes are only checked as far as needed to split them, so a malformed value fails when
+       it is read.</td>
+    </tr>
+    </tbody>
+</table>
+
+Note: a `VARIANT` column holds one JSON document per message. If a message holds more, only the first is read. To read
+newline-delimited JSON, declare the column as `STRING` with `raw.line-delimiter` and convert each row with `PARSE_JSON`.
+

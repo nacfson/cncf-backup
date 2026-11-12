@@ -1,0 +1,539 @@
+{
+  "schema_version": 1,
+  "default_scope": "text-svg",
+  "projects": [
+    {
+      "slug": "kubernetes",
+      "name": "Kubernetes",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://kubernetes.io/docs/",
+      "sources": [
+        {
+          "repo": "kubernetes/website",
+          "branch": "main",
+          "paths": [
+            { "src": "content/en/docs", "dest": "" },
+            { "src": "static/images/docs", "dest": "images", "svg_only": true }
+          ],
+          "exclude_dirs": ["doc-contributor-tools"]
+        }
+      ]
+    },
+    {
+      "slug": "etcd",
+      "name": "etcd",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://etcd.io/docs/",
+      "sources": [
+        {
+          "repo": "etcd-io/website",
+          "branch": "main",
+          "version_resolver": {
+            "type": "yaml_key",
+            "config_file": "config.yaml",
+            "regex": "latest_stable_version:\\s*[\"']?(v[0-9.]+)[\"']?",
+            "path_template": "content/en/docs/{version}",
+            "fallback_parent": "content/en/docs",
+            "fallback_regex": "^v\\d+\\.\\d+$"
+          },
+          "paths": [
+            { "src": "{resolved_path}", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "containerd",
+      "name": "containerd",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://containerd.io/docs/",
+      "sources": [
+        {
+          "repo": "containerd/containerd",
+          "branch": "main",
+          "paths": [
+            { "src": "docs", "dest": "" }
+          ],
+          "exclude_dirs": ["historical"]
+        }
+      ]
+    },
+    {
+      "slug": "coredns",
+      "name": "CoreDNS",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://coredns.io/manual/toc/",
+      "sources": [
+        {
+          "repo": "coredns/coredns.io",
+          "branch": "master",
+          "paths": [
+            { "src": "content/manual", "dest": "manual" },
+            { "src": "content/plugins", "dest": "plugins" },
+            { "src": "content/explugins", "dest": "explugins" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "kubevirt",
+      "name": "KubeVirt",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://kubevirt.io/user-guide/",
+      "sources": [
+        {
+          "repo": "kubevirt/user-guide",
+          "branch": "main",
+          "paths": [
+            { "src": "docs", "dest": "" }
+          ],
+          "exclude_dirs": ["stylesheets"]
+        }
+      ]
+    },
+    {
+      "slug": "karmada",
+      "name": "Karmada",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://karmada.io/docs/",
+      "sources": [
+        {
+          "repo": "karmada-io/website",
+          "branch": "main",
+          "paths": [
+            { "src": "docs", "dest": "" },
+            { "src": "static/img", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "cilium",
+      "name": "Cilium",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "rst",
+      "website": "https://docs.cilium.io/",
+      "sources": [
+        {
+          "repo": "cilium/cilium",
+          "branch": "main",
+          "paths": [
+            { "src": "Documentation", "dest": "" }
+          ],
+          "exclude_dirs": ["_exts", "_templates", "_build"]
+        }
+      ]
+    },
+    {
+      "slug": "envoy",
+      "name": "Envoy",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "rst",
+      "website": "https://www.envoyproxy.io/docs/envoy/latest/",
+      "sources": [
+        {
+          "repo": "envoyproxy/envoy",
+          "branch": "main",
+          "paths": [
+            { "src": "docs/root", "dest": "" }
+          ],
+          "exclude_dirs": ["_templates", "_pygments"]
+        }
+      ]
+    },
+    {
+      "slug": "istio",
+      "name": "Istio",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "markdown",
+      "website": "https://istio.io/latest/docs/",
+      "sources": [
+        {
+          "repo": "istio/istio.io",
+          "branch": "master",
+          "paths": [
+            { "src": "content/en/docs", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "linkerd",
+      "name": "Linkerd",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "markdown",
+      "website": "https://linkerd.io/2/overview/",
+      "sources": [
+        {
+          "repo": "linkerd/website",
+          "branch": "main",
+          "version_resolver": {
+            "type": "highest_semver_dir",
+            "parent_dir": "linkerd.io/content",
+            "regex": "^(\\d+)\\.(\\d+)$",
+            "path_template": "linkerd.io/content/{version}"
+          },
+          "paths": [
+            { "src": "{resolved_path}", "dest": "" },
+            { "src": "linkerd.io/static/images", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "prometheus",
+      "name": "Prometheus",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://prometheus.io/docs/",
+      "sources": [
+        {
+          "repo": "prometheus/docs",
+          "branch": "main",
+          "license_dest": "UPSTREAM_LICENSE_SITE",
+          "paths": [
+            { "src": "docs", "dest": "site" }
+          ]
+        },
+        {
+          "repo": "prometheus/prometheus",
+          "branch": "main",
+          "license_dest": "UPSTREAM_LICENSE_PROMETHEUS",
+          "paths": [
+            { "src": "docs", "dest": "prometheus" }
+          ]
+        },
+        {
+          "repo": "prometheus/alertmanager",
+          "branch": "main",
+          "license_dest": "UPSTREAM_LICENSE_ALERTMANAGER",
+          "paths": [
+            { "src": "docs", "dest": "alertmanager" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "opentelemetry",
+      "name": "OpenTelemetry",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://opentelemetry.io/docs/",
+      "sources": [
+        {
+          "repo": "open-telemetry/opentelemetry.io",
+          "branch": "main",
+          "paths": [
+            { "src": "content/en/docs", "dest": "" },
+            { "src": "static/img", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "jaeger",
+      "name": "Jaeger",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://www.jaegertracing.io/docs/",
+      "sources": [
+        {
+          "repo": "jaegertracing/documentation",
+          "branch": "main",
+          "version_resolver": {
+            "type": "yaml_key",
+            "config_file": "hugo.yaml",
+            "regex": "latestV2:\\s*[\"']?([0-9.]+)[\"']?",
+            "path_template": "content/docs/v2/{version}",
+            "fallback_parent": "content/docs/v2",
+            "fallback_regex": "^\\d+\\.\\d+$"
+          },
+          "paths": [
+            { "src": "{resolved_path}", "dest": "" },
+            { "src": "static/img", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "fluentd",
+      "name": "Fluentd",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://docs.fluentd.org/",
+      "sources": [
+        {
+          "repo": "fluent/fluentd-docs-gitbook",
+          "branch": "1.0",
+          "paths": [
+            { "src": "", "dest": "" },
+            { "src": ".gitbook/assets", "dest": "assets", "svg_only": true }
+          ],
+          "exclude_dirs": [".git", ".github", ".gitbook", "_layouts", "scripts", "styles", "node_modules"],
+          "exclude_files": ["book.json", "package.json", "package-lock.json", "netlify.toml", "_redirects"]
+        }
+      ]
+    },
+    {
+      "slug": "helm",
+      "name": "Helm",
+      "layer": "GitOps & Packaging",
+      "layer_slug": "gitops-packaging",
+      "format": "markdown",
+      "website": "https://helm.sh/docs/",
+      "sources": [
+        {
+          "repo": "helm/helm-www",
+          "branch": "main",
+          "paths": [
+            { "src": "docs", "dest": "" },
+            { "src": "static/img", "dest": "images", "svg_only": true }
+          ],
+          "exclude_dirs": ["helm-4-release-party"]
+        }
+      ]
+    },
+    {
+      "slug": "argo",
+      "name": "Argo (CD, Workflows, Rollouts)",
+      "layer": "GitOps & Packaging",
+      "layer_slug": "gitops-packaging",
+      "format": "markdown",
+      "website": "https://argoproj.github.io/",
+      "sources": [
+        {
+          "repo": "argoproj/argo-cd",
+          "branch": "master",
+          "license_dest": "argo-cd/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "docs", "dest": "argo-cd" }
+          ],
+          "exclude_dirs": ["snyk"]
+        },
+        {
+          "repo": "argoproj/argo-workflows",
+          "branch": "main",
+          "license_dest": "argo-workflows/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "docs", "dest": "argo-workflows" }
+          ],
+          "exclude_dirs": ["overrides"]
+        },
+        {
+          "repo": "argoproj/argo-rollouts",
+          "branch": "master",
+          "license_dest": "argo-rollouts/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "docs", "dest": "argo-rollouts" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "flux",
+      "name": "Flux",
+      "layer": "GitOps & Packaging",
+      "layer_slug": "gitops-packaging",
+      "format": "markdown",
+      "website": "https://fluxcd.io/flux/",
+      "sources": [
+        {
+          "repo": "fluxcd/website",
+          "branch": "main",
+          "paths": [
+            { "src": "content/en/flux", "dest": "" },
+            { "src": "static/img", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "spiffe-spire",
+      "name": "SPIFFE / SPIRE",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://spiffe.io/docs/latest/",
+      "sources": [
+        {
+          "repo": "spiffe/spiffe.io",
+          "branch": "master",
+          "license_dest": "spiffe-io/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "content/docs/latest", "dest": "spiffe-io" },
+            { "src": "static/img", "dest": "spiffe-io/images", "svg_only": true }
+          ]
+        },
+        {
+          "repo": "spiffe/spire",
+          "branch": "main",
+          "license_dest": "spire/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "doc", "dest": "spire" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "opa",
+      "name": "Open Policy Agent (OPA)",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://www.openpolicyagent.org/docs/latest/",
+      "sources": [
+        {
+          "repo": "open-policy-agent/opa",
+          "branch": "main",
+          "paths": [
+            { "src": "docs/docs", "dest": "" },
+            { "src": "docs/static/img", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "kyverno",
+      "name": "Kyverno",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://kyverno.io/docs/",
+      "sources": [
+        {
+          "repo": "kyverno/website",
+          "branch": "main",
+          "paths": [
+            { "src": "src/content/docs", "dest": "" },
+            { "src": "src/assets", "dest": "assets", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "cert-manager",
+      "name": "cert-manager",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://cert-manager.io/docs/",
+      "sources": [
+        {
+          "repo": "cert-manager/website",
+          "branch": "master",
+          "paths": [
+            { "src": "content/docs", "dest": "" },
+            { "src": "public/images", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "falco",
+      "name": "Falco",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://falco.org/docs/",
+      "sources": [
+        {
+          "repo": "falcosecurity/falco-website",
+          "branch": "master",
+          "paths": [
+            { "src": "content/en/docs", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "harbor",
+      "name": "Harbor",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://goharbor.io/docs/",
+      "sources": [
+        {
+          "repo": "goharbor/website",
+          "branch": "main",
+          "paths": [
+            { "src": "docs", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "rook",
+      "name": "Rook",
+      "layer": "Storage & Messaging",
+      "layer_slug": "storage-messaging",
+      "format": "markdown",
+      "website": "https://rook.io/docs/rook/latest/",
+      "sources": [
+        {
+          "repo": "rook/rook",
+          "branch": "master",
+          "paths": [
+            { "src": "Documentation", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "nats",
+      "name": "NATS",
+      "layer": "Storage & Messaging",
+      "layer_slug": "storage-messaging",
+      "format": "markdown",
+      "website": "https://docs.nats.io/",
+      "sources": [
+        {
+          "repo": "nats-io/nats.docs",
+          "branch": "master",
+          "paths": [
+            { "src": "", "dest": "" }
+          ],
+          "exclude_dirs": [".git", ".github", ".gitbook", "docs", "legacy", "zh-cn", "_layouts", "_tools", "node_modules"],
+          "exclude_files": ["book.json", "Makefile"]
+        }
+      ]
+    },
+    {
+      "slug": "kubeflow",
+      "name": "Kubeflow",
+      "layer": "AI / ML",
+      "layer_slug": "ai-ml",
+      "format": "markdown",
+      "website": "https://www.kubeflow.org/docs/",
+      "sources": [
+        {
+          "repo": "kubeflow/website",
+          "branch": "master",
+          "paths": [
+            { "src": "content/en/docs", "dest": "" }
+          ]
+        }
+      ]
+    }
+  ]
+}

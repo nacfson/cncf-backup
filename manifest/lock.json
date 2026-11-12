@@ -1,0 +1,1187 @@
+{
+  "schema_version": 1,
+  "synced_at_utc": "2026-11-12T02:03:52Z",
+  "scope": "text-svg",
+  "project_count": 26,
+  "totals": {
+    "markdown": 6453,
+    "rst": 831,
+    "text_other": 80,
+    "code_config": 882,
+    "svg": 513,
+    "media_other": 0,
+    "total_files": 8759,
+    "total_bytes": 85207187
+  },
+  "projects": [
+    {
+      "slug": "kubernetes",
+      "name": "Kubernetes",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://kubernetes.io/docs/",
+      "local_path": "docs/orchestration-core/kubernetes",
+      "sources": [
+        {
+          "repo": "kubernetes/website",
+          "url": "https://github.com/kubernetes/website",
+          "branch": "main",
+          "commit_sha": "18f8e9f6d2b0bc9d33e82ceac8abcfffdf8c1ca8",
+          "commit_date": "2026-11-11T10:37:48+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/en/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/images/docs",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 1799,
+          "bytes": 19451714
+        }
+      ],
+      "stats": {
+        "markdown": 1721,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 2,
+        "svg": 76,
+        "media_other": 0,
+        "total_files": 1799,
+        "total_bytes": 19451714
+      }
+    },
+    {
+      "slug": "etcd",
+      "name": "etcd",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://etcd.io/docs/",
+      "local_path": "docs/orchestration-core/etcd",
+      "sources": [
+        {
+          "repo": "etcd-io/website",
+          "url": "https://github.com/etcd-io/website",
+          "branch": "main",
+          "commit_sha": "41e5cd6ab9efcf67270cea28790f77df8e6c2ed4",
+          "commit_date": "2026-11-06T13:58:16-08:00",
+          "resolved_version": "v3.7",
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/en/docs/v3.7",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 105,
+          "bytes": 1204280
+        }
+      ],
+      "stats": {
+        "markdown": 98,
+        "rst": 0,
+        "text_other": 1,
+        "code_config": 4,
+        "svg": 2,
+        "media_other": 0,
+        "total_files": 105,
+        "total_bytes": 1204280
+      }
+    },
+    {
+      "slug": "containerd",
+      "name": "containerd",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://containerd.io/docs/",
+      "local_path": "docs/orchestration-core/containerd",
+      "sources": [
+        {
+          "repo": "containerd/containerd",
+          "url": "https://github.com/containerd/containerd",
+          "branch": "main",
+          "commit_sha": "bc6efe74c55e588dded980f941a7b1ddd2f6e24d",
+          "commit_date": "2026-11-11T19:00:08+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 41,
+          "bytes": 424778
+        }
+      ],
+      "stats": {
+        "markdown": 40,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 41,
+        "total_bytes": 424778
+      }
+    },
+    {
+      "slug": "coredns",
+      "name": "CoreDNS",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://coredns.io/manual/toc/",
+      "local_path": "docs/orchestration-core/coredns",
+      "sources": [
+        {
+          "repo": "coredns/coredns.io",
+          "url": "https://github.com/coredns/coredns.io",
+          "branch": "master",
+          "commit_sha": "ac92d6b4a9ce165b15dca3f52da29fc5dd903881",
+          "commit_date": "2026-10-03T02:30:37-07:00",
+          "resolved_version": null,
+          "license_file": null,
+          "mappings": [
+            {
+              "upstream_path": "content/manual",
+              "local_subdir": "manual",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "content/plugins",
+              "local_subdir": "plugins",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "content/explugins",
+              "local_subdir": "explugins",
+              "svg_only": false
+            }
+          ],
+          "files": 111,
+          "bytes": 415446
+        }
+      ],
+      "stats": {
+        "markdown": 111,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 111,
+        "total_bytes": 415446
+      }
+    },
+    {
+      "slug": "kubevirt",
+      "name": "KubeVirt",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://kubevirt.io/user-guide/",
+      "local_path": "docs/orchestration-core/kubevirt",
+      "sources": [
+        {
+          "repo": "kubevirt/user-guide",
+          "url": "https://github.com/kubevirt/user-guide",
+          "branch": "main",
+          "commit_sha": "a5ee79eb1158499fe159be30c5980b70f6470800",
+          "commit_date": "2026-11-10T14:30:55+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 109,
+          "bytes": 1160155
+        }
+      ],
+      "stats": {
+        "markdown": 99,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 9,
+        "svg": 1,
+        "media_other": 0,
+        "total_files": 109,
+        "total_bytes": 1160155
+      }
+    },
+    {
+      "slug": "karmada",
+      "name": "Karmada",
+      "layer": "Orchestration & Core",
+      "layer_slug": "orchestration-core",
+      "format": "markdown",
+      "website": "https://karmada.io/docs/",
+      "local_path": "docs/orchestration-core/karmada",
+      "sources": [
+        {
+          "repo": "karmada-io/website",
+          "url": "https://github.com/karmada-io/website",
+          "branch": "main",
+          "commit_sha": "09a91484291f42b53ca695abbce9bbe6b95bb7f1",
+          "commit_date": "2026-11-02T11:26:31+08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 302,
+          "bytes": 3120701
+        }
+      ],
+      "stats": {
+        "markdown": 259,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 36,
+        "svg": 7,
+        "media_other": 0,
+        "total_files": 302,
+        "total_bytes": 3120701
+      }
+    },
+    {
+      "slug": "cilium",
+      "name": "Cilium",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "rst",
+      "website": "https://docs.cilium.io/",
+      "local_path": "docs/networking-mesh/cilium",
+      "sources": [
+        {
+          "repo": "cilium/cilium",
+          "url": "https://github.com/cilium/cilium",
+          "branch": "main",
+          "commit_sha": "f32bb49abd833dec942d9692ca902a401fa4f0f6",
+          "commit_date": "2026-11-11T17:05:03-08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "Documentation",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 695,
+          "bytes": 5038516
+        }
+      ],
+      "stats": {
+        "markdown": 336,
+        "rst": 317,
+        "text_other": 7,
+        "code_config": 24,
+        "svg": 11,
+        "media_other": 0,
+        "total_files": 695,
+        "total_bytes": 5038516
+      }
+    },
+    {
+      "slug": "envoy",
+      "name": "Envoy",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "rst",
+      "website": "https://www.envoyproxy.io/docs/envoy/latest/",
+      "local_path": "docs/networking-mesh/envoy",
+      "sources": [
+        {
+          "repo": "envoyproxy/envoy",
+          "url": "https://github.com/envoyproxy/envoy",
+          "branch": "main",
+          "commit_sha": "56d0713f6e74bd88850304aa003abf8427017996",
+          "commit_date": "2026-11-11T17:46:31-08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs/root",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 716,
+          "bytes": 6808187
+        }
+      ],
+      "stats": {
+        "markdown": 0,
+        "rst": 514,
+        "text_other": 0,
+        "code_config": 155,
+        "svg": 47,
+        "media_other": 0,
+        "total_files": 716,
+        "total_bytes": 6808187
+      }
+    },
+    {
+      "slug": "istio",
+      "name": "Istio",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "markdown",
+      "website": "https://istio.io/latest/docs/",
+      "local_path": "docs/networking-mesh/istio",
+      "sources": [
+        {
+          "repo": "istio/istio.io",
+          "url": "https://github.com/istio/istio.io",
+          "branch": "master",
+          "commit_sha": "962f6f65b5ec120fd7cfa5904f2aa252ec37540f",
+          "commit_date": "2026-11-11T16:03:43-06:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/en/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 733,
+          "bytes": 7747076
+        }
+      ],
+      "stats": {
+        "markdown": 436,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 236,
+        "svg": 61,
+        "media_other": 0,
+        "total_files": 733,
+        "total_bytes": 7747076
+      }
+    },
+    {
+      "slug": "linkerd",
+      "name": "Linkerd",
+      "layer": "Networking & Mesh",
+      "layer_slug": "networking-mesh",
+      "format": "markdown",
+      "website": "https://linkerd.io/2/overview/",
+      "local_path": "docs/networking-mesh/linkerd",
+      "sources": [
+        {
+          "repo": "linkerd/website",
+          "url": "https://github.com/linkerd/website",
+          "branch": "main",
+          "commit_sha": "4a84011881f22a204d2a4348a3476bc9c5ec42f0",
+          "commit_date": "2026-11-10T13:05:55-06:00",
+          "resolved_version": "2.19",
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "linkerd.io/content/2.19",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "linkerd.io/static/images",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 157,
+          "bytes": 1429252
+        }
+      ],
+      "stats": {
+        "markdown": 134,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 23,
+        "media_other": 0,
+        "total_files": 157,
+        "total_bytes": 1429252
+      }
+    },
+    {
+      "slug": "prometheus",
+      "name": "Prometheus",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://prometheus.io/docs/",
+      "local_path": "docs/observability/prometheus",
+      "sources": [
+        {
+          "repo": "prometheus/docs",
+          "url": "https://github.com/prometheus/docs",
+          "branch": "main",
+          "commit_sha": "9bc542d9e249eac482c719668d19387e8774559f",
+          "commit_date": "2026-11-11T16:21:00+01:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE_SITE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "site",
+              "svg_only": false
+            }
+          ],
+          "files": 70,
+          "bytes": 829627
+        },
+        {
+          "repo": "prometheus/prometheus",
+          "url": "https://github.com/prometheus/prometheus",
+          "branch": "main",
+          "commit_sha": "49c815a0ea46c7a6a6b723e4b634c4bf36f7022c",
+          "commit_date": "2026-11-11T10:05:41+01:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE_PROMETHEUS",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "prometheus",
+              "svg_only": false
+            }
+          ],
+          "files": 30,
+          "bytes": 588789
+        },
+        {
+          "repo": "prometheus/alertmanager",
+          "url": "https://github.com/prometheus/alertmanager",
+          "branch": "main",
+          "commit_sha": "b6c5821b9f33187955b411c976114eeaf7b18c47",
+          "commit_date": "2026-11-11T18:39:06+01:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE_ALERTMANAGER",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "alertmanager",
+              "svg_only": false
+            }
+          ],
+          "files": 11,
+          "bytes": 151732
+        }
+      ],
+      "stats": {
+        "markdown": 111,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 111,
+        "total_bytes": 1570148
+      }
+    },
+    {
+      "slug": "opentelemetry",
+      "name": "OpenTelemetry",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://opentelemetry.io/docs/",
+      "local_path": "docs/observability/opentelemetry",
+      "sources": [
+        {
+          "repo": "open-telemetry/opentelemetry.io",
+          "url": "https://github.com/open-telemetry/opentelemetry.io",
+          "branch": "main",
+          "commit_sha": "6916167d61aba7cef0a2fcb7a757d90397c26f1c",
+          "commit_date": "2026-11-11T18:00:16+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/en/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 504,
+          "bytes": 5845529
+        }
+      ],
+      "stats": {
+        "markdown": 447,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 56,
+        "media_other": 0,
+        "total_files": 504,
+        "total_bytes": 5845529
+      }
+    },
+    {
+      "slug": "jaeger",
+      "name": "Jaeger",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://www.jaegertracing.io/docs/",
+      "local_path": "docs/observability/jaeger",
+      "sources": [
+        {
+          "repo": "jaegertracing/documentation",
+          "url": "https://github.com/jaegertracing/documentation",
+          "branch": "main",
+          "commit_sha": "fc38927c851c96094ba69f603ed3ed56bf3a6926",
+          "commit_date": "2026-11-09T15:46:33-05:00",
+          "resolved_version": "2.23",
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/docs/v2/2.23",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 41,
+          "bytes": 464433
+        }
+      ],
+      "stats": {
+        "markdown": 37,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 4,
+        "media_other": 0,
+        "total_files": 41,
+        "total_bytes": 464433
+      }
+    },
+    {
+      "slug": "fluentd",
+      "name": "Fluentd",
+      "layer": "Observability",
+      "layer_slug": "observability",
+      "format": "markdown",
+      "website": "https://docs.fluentd.org/",
+      "local_path": "docs/observability/fluentd",
+      "sources": [
+        {
+          "repo": "fluent/fluentd-docs-gitbook",
+          "url": "https://github.com/fluent/fluentd-docs-gitbook",
+          "branch": "1.0",
+          "commit_sha": "c454defcb185e11cb85735535fff04f0bf09ca3e",
+          "commit_date": "2026-11-01T13:50:11+09:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "/",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 220,
+          "bytes": 1810511
+        }
+      ],
+      "stats": {
+        "markdown": 211,
+        "rst": 0,
+        "text_other": 1,
+        "code_config": 1,
+        "svg": 7,
+        "media_other": 0,
+        "total_files": 220,
+        "total_bytes": 1810511
+      }
+    },
+    {
+      "slug": "helm",
+      "name": "Helm",
+      "layer": "GitOps & Packaging",
+      "layer_slug": "gitops-packaging",
+      "format": "markdown",
+      "website": "https://helm.sh/docs/",
+      "local_path": "docs/gitops-packaging/helm",
+      "sources": [
+        {
+          "repo": "helm/helm-www",
+          "url": "https://github.com/helm/helm-www",
+          "branch": "main",
+          "commit_sha": "f9630272ef357f051d72e4311b97a3d2c701c8c0",
+          "commit_date": "2026-11-10T20:33:53-07:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 139,
+          "bytes": 885685
+        }
+      ],
+      "stats": {
+        "markdown": 127,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 11,
+        "media_other": 0,
+        "total_files": 139,
+        "total_bytes": 885685
+      }
+    },
+    {
+      "slug": "argo",
+      "name": "Argo (CD, Workflows, Rollouts)",
+      "layer": "GitOps & Packaging",
+      "layer_slug": "gitops-packaging",
+      "format": "markdown",
+      "website": "https://argoproj.github.io/",
+      "local_path": "docs/gitops-packaging/argo",
+      "sources": [
+        {
+          "repo": "argoproj/argo-cd",
+          "url": "https://github.com/argoproj/argo-cd",
+          "branch": "master",
+          "commit_sha": "502a7513e54939143f740e4fc0b278ec53d4336a",
+          "commit_date": "2026-11-11T22:57:42+00:00",
+          "resolved_version": null,
+          "license_file": "argo-cd/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "argo-cd",
+              "svg_only": false
+            }
+          ],
+          "files": 480,
+          "bytes": 3350053
+        },
+        {
+          "repo": "argoproj/argo-workflows",
+          "url": "https://github.com/argoproj/argo-workflows",
+          "branch": "main",
+          "commit_sha": "93303d1862325845bb73e9b194857732ec2615f7",
+          "commit_date": "2026-11-11T23:52:09+00:00",
+          "resolved_version": null,
+          "license_file": "argo-workflows/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "argo-workflows",
+              "svg_only": false
+            }
+          ],
+          "files": 218,
+          "bytes": 2004823
+        },
+        {
+          "repo": "argoproj/argo-rollouts",
+          "url": "https://github.com/argoproj/argo-rollouts",
+          "branch": "master",
+          "commit_sha": "4008dce7c67639675f777d5588db366581739534",
+          "commit_date": "2026-11-08T10:12:49-07:00",
+          "resolved_version": null,
+          "license_file": "argo-rollouts/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "argo-rollouts",
+              "svg_only": false
+            }
+          ],
+          "files": 157,
+          "bytes": 4757743
+        }
+      ],
+      "stats": {
+        "markdown": 804,
+        "rst": 0,
+        "text_other": 3,
+        "code_config": 48,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 855,
+        "total_bytes": 10112619
+      }
+    },
+    {
+      "slug": "flux",
+      "name": "Flux",
+      "layer": "GitOps & Packaging",
+      "layer_slug": "gitops-packaging",
+      "format": "markdown",
+      "website": "https://fluxcd.io/flux/",
+      "local_path": "docs/gitops-packaging/flux",
+      "sources": [
+        {
+          "repo": "fluxcd/website",
+          "url": "https://github.com/fluxcd/website",
+          "branch": "main",
+          "commit_sha": "8692e419ef59246141b8b83e7018c104d40eb43b",
+          "commit_date": "2026-11-09T13:55:32+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/en/flux",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 161,
+          "bytes": 1741296
+        }
+      ],
+      "stats": {
+        "markdown": 111,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 50,
+        "media_other": 0,
+        "total_files": 161,
+        "total_bytes": 1741296
+      }
+    },
+    {
+      "slug": "spiffe-spire",
+      "name": "SPIFFE / SPIRE",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://spiffe.io/docs/latest/",
+      "local_path": "docs/security-identity/spiffe-spire",
+      "sources": [
+        {
+          "repo": "spiffe/spiffe.io",
+          "url": "https://github.com/spiffe/spiffe.io",
+          "branch": "master",
+          "commit_sha": "e329662c0e27b97b9a680fc5cf9de0de0dc83e53",
+          "commit_date": "2026-11-11T18:03:35+00:00",
+          "resolved_version": null,
+          "license_file": "spiffe-io/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/docs/latest",
+              "local_subdir": "spiffe-io",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/img",
+              "local_subdir": "spiffe-io/images",
+              "svg_only": true
+            }
+          ],
+          "files": 103,
+          "bytes": 1181737
+        },
+        {
+          "repo": "spiffe/spire",
+          "url": "https://github.com/spiffe/spire",
+          "branch": "main",
+          "commit_sha": "ca4c2442bac1334a859a15c72a5500b44be32ab3",
+          "commit_date": "2026-11-10T09:10:14+00:00",
+          "resolved_version": null,
+          "license_file": "spire/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "doc",
+              "local_subdir": "spire",
+              "svg_only": false
+            }
+          ],
+          "files": 74,
+          "bytes": 759819
+        }
+      ],
+      "stats": {
+        "markdown": 114,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 62,
+        "media_other": 0,
+        "total_files": 177,
+        "total_bytes": 1941556
+      }
+    },
+    {
+      "slug": "opa",
+      "name": "Open Policy Agent (OPA)",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://www.openpolicyagent.org/docs/latest/",
+      "local_path": "docs/security-identity/opa",
+      "sources": [
+        {
+          "repo": "open-policy-agent/opa",
+          "url": "https://github.com/open-policy-agent/opa",
+          "branch": "main",
+          "commit_sha": "ef171a816f9da4bc26085f634f14f477d85d242c",
+          "commit_date": "2026-11-10T17:33:37-06:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "docs/static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 608,
+          "bytes": 1865968
+        }
+      ],
+      "stats": {
+        "markdown": 215,
+        "rst": 0,
+        "text_other": 68,
+        "code_config": 308,
+        "svg": 17,
+        "media_other": 0,
+        "total_files": 608,
+        "total_bytes": 1865968
+      }
+    },
+    {
+      "slug": "kyverno",
+      "name": "Kyverno",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://kyverno.io/docs/",
+      "local_path": "docs/security-identity/kyverno",
+      "sources": [
+        {
+          "repo": "kyverno/website",
+          "url": "https://github.com/kyverno/website",
+          "branch": "main",
+          "commit_sha": "eb7c94bb94153c0501855b251c9ba2e723b419df",
+          "commit_date": "2026-11-10T12:04:12+02:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "src/content/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "src/assets",
+              "local_subdir": "assets",
+              "svg_only": true
+            }
+          ],
+          "files": 80,
+          "bytes": 1399224
+        }
+      ],
+      "stats": {
+        "markdown": 63,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 17,
+        "media_other": 0,
+        "total_files": 80,
+        "total_bytes": 1399224
+      }
+    },
+    {
+      "slug": "cert-manager",
+      "name": "cert-manager",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://cert-manager.io/docs/",
+      "local_path": "docs/security-identity/cert-manager",
+      "sources": [
+        {
+          "repo": "cert-manager/website",
+          "url": "https://github.com/cert-manager/website",
+          "branch": "master",
+          "commit_sha": "82745109ed8dc8b2d7ce67bb4a8394d5f06ae1a6",
+          "commit_date": "2026-11-08T14:28:07+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "public/images",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 261,
+          "bytes": 3592845
+        }
+      ],
+      "stats": {
+        "markdown": 201,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 25,
+        "svg": 35,
+        "media_other": 0,
+        "total_files": 261,
+        "total_bytes": 3592845
+      }
+    },
+    {
+      "slug": "falco",
+      "name": "Falco",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://falco.org/docs/",
+      "local_path": "docs/security-identity/falco",
+      "sources": [
+        {
+          "repo": "falcosecurity/falco-website",
+          "url": "https://github.com/falcosecurity/falco-website",
+          "branch": "master",
+          "commit_sha": "a16386978afdaaad8bb6fb74bd5a8640c5d7e7d1",
+          "commit_date": "2026-11-10T21:53:27+01:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/en/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 163,
+          "bytes": 785249
+        }
+      ],
+      "stats": {
+        "markdown": 163,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 163,
+        "total_bytes": 785249
+      }
+    },
+    {
+      "slug": "harbor",
+      "name": "Harbor",
+      "layer": "Security & Identity",
+      "layer_slug": "security-identity",
+      "format": "markdown",
+      "website": "https://goharbor.io/docs/",
+      "local_path": "docs/security-identity/harbor",
+      "sources": [
+        {
+          "repo": "goharbor/website",
+          "url": "https://github.com/goharbor/website",
+          "branch": "main",
+          "commit_sha": "f592bafad330584e5ddaaf0ba05ab44ac751e73e",
+          "commit_date": "2026-11-11T14:21:28+08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 96,
+          "bytes": 822212
+        }
+      ],
+      "stats": {
+        "markdown": 93,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 2,
+        "media_other": 0,
+        "total_files": 96,
+        "total_bytes": 822212
+      }
+    },
+    {
+      "slug": "rook",
+      "name": "Rook",
+      "layer": "Storage & Messaging",
+      "layer_slug": "storage-messaging",
+      "format": "markdown",
+      "website": "https://rook.io/docs/rook/latest/",
+      "local_path": "docs/storage-messaging/rook",
+      "sources": [
+        {
+          "repo": "rook/rook",
+          "url": "https://github.com/rook/rook",
+          "branch": "master",
+          "commit_sha": "719f345e220db7b9617c98a43f74160fa039cc7d",
+          "commit_date": "2026-11-11T08:32:27-07:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "Documentation",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 98,
+          "bytes": 1194244
+        }
+      ],
+      "stats": {
+        "markdown": 96,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 1,
+        "media_other": 0,
+        "total_files": 98,
+        "total_bytes": 1194244
+      }
+    },
+    {
+      "slug": "nats",
+      "name": "NATS",
+      "layer": "Storage & Messaging",
+      "layer_slug": "storage-messaging",
+      "format": "markdown",
+      "website": "https://docs.nats.io/",
+      "local_path": "docs/storage-messaging/nats",
+      "sources": [
+        {
+          "repo": "nats-io/nats.docs",
+          "url": "https://github.com/nats-io/nats.docs",
+          "branch": "master",
+          "commit_sha": "f115becf6563e3bbe16bb94cbf87bfceb84199c1",
+          "commit_date": "2026-08-24T09:38:18-05:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "/",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 209,
+          "bytes": 1646153
+        }
+      ],
+      "stats": {
+        "markdown": 201,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 7,
+        "media_other": 0,
+        "total_files": 209,
+        "total_bytes": 1646153
+      }
+    },
+    {
+      "slug": "kubeflow",
+      "name": "Kubeflow",
+      "layer": "AI / ML",
+      "layer_slug": "ai-ml",
+      "format": "markdown",
+      "website": "https://www.kubeflow.org/docs/",
+      "local_path": "docs/ai-ml/kubeflow",
+      "sources": [
+        {
+          "repo": "kubeflow/website",
+          "url": "https://github.com/kubeflow/website",
+          "branch": "master",
+          "commit_sha": "a7b22c962aeddfecb68d6cf747f8a1bbb0543018",
+          "commit_date": "2026-11-11T18:07:09+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "content/en/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 268,
+          "bytes": 2729410
+        }
+      ],
+      "stats": {
+        "markdown": 225,
+        "rst": 0,
+        "text_other": 0,
+        "code_config": 27,
+        "svg": 16,
+        "media_other": 0,
+        "total_files": 268,
+        "total_bytes": 2729410
+      }
+    }
+  ]
+}

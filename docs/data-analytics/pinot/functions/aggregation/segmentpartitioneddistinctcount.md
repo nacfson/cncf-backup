@@ -1,0 +1,34 @@
+---
+description: >-
+  This section contains reference documentation for the
+  SEGMENTPARTITIONEDDISTINCTCOUNT function.
+---
+
+# SEGMENTPARTITIONEDDISTINCTCOUNT
+
+Returns the count of distinct values of a column when the column is pre-partitioned for each segment, where there is no common value within different segments. This function calculates the exact count of distinct values within the segment, then simply sums up the results from different segments to get the final result.
+
+{% hint style="warning" %}
+This function relies on the expression values being partitioned for each segment, where there are no common values within different segments.
+{% endhint %}
+
+## Signature
+
+> SEGMENTPARTITIONEDDISTINCTCOUNT(colName)
+
+The input column can be single-value or multi-value. For a multi-value column, Pinot counts each distinct value contained in the rows. The partitioning requirement still applies to every value: the same value must not occur in different segments.
+
+With [advanced null handling](../../build-with-pinot/querying-and-sql/null-value-support.md#advanced-null-handling-support) enabled, Pinot skips null rows. Without advanced null handling, the column's configured default null value contributes to the count. The function returns `0` when no non-null rows contribute.
+
+## Usage Examples
+
+These examples are based on the [Batch Quick Start](../../basics/getting-started/quick-start.md#batch-processing).
+
+```sql
+select SEGMENTPARTITIONEDDISTINCTCOUNT(teamID) AS value
+from baseballStats 
+```
+
+| value |
+| ----- |
+| 149   |

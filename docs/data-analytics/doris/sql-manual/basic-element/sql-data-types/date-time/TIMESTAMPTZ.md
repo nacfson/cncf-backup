@@ -1,0 +1,126 @@
+---
+{
+    "title": "TIMESTAMPTZ",
+    "language": "en",
+    "description": "TIMESTAMPTZ is the data type in Doris used to store date and time information with time zone awareness,"
+}
+---
+
+## Description
+
+TIMESTAMPTZ is the data type in Doris used to store date and time information with time zone awareness, corresponding to TIMESTAMP WITH TIME ZONE in standard SQL.
+
+In different database systems, time zone-aware timestamp types have various naming conventions:
+- PostgreSQL and Oracle use TIMESTAMP WITH TIME ZONE
+- SQL Server uses DATETIMEOFFSET
+- Some other databases use TIMESTAMP WITH LOCAL TIME ZONE
+
+According to SQL standards, the standalone TIMESTAMP type should not carry time zone information (equivalent to TIMESTAMP WITHOUT TIME ZONE). Considering user habits and ease of use, Doris chose the more concise name TIMESTAMPTZ to represent the timestamp type with time zone. Doris does not have a standalone `TIMESTAMP` type: use `DATETIME` for a broad-range time-zone-naive value, or [`TIMESTAMP_NS`](./TIMESTAMP-NS.md) for a time-zone-naive value with fixed nanosecond precision.
+
+The range of TIMESTAMPTZ is the same as DATETIME, being `[0000-01-01 00:00:00.000000, 9999-12-31 23:59:59.999999]`.
+TIMESTAMPTZ supports specifying precision in the format TIMESTAMPTZ(p), where `p` represents the precision and can range from `[0, 6]`, with a default value of 0. In other words, TIMESTAMPTZ is equivalent to TIMESTAMPTZ(0). The default output format is `'yyyy-MM-dd HH:mm:ss.SSSSSS +XX:XX'`, where `+XX:XX` represents the time zone offset (note that the number of digits in `SSSSSS` is determined by the precision `p`).
+
+The TIMESTAMPTZ type can be used as a primary key, partitioning column, and bucketing column.
+
+### Working Principle
+
+TIMESTAMPTZ implementation does not store time zone information with each row of data, but instead adopts the following mechanism:
+1. During storage: All input time values are converted to UTC (Coordinated Universal Time).
+2. During query: Based on the session's time zone setting (specified via the `time_zone` variable), UTC time is automatically converted to the corresponding time zone for display.
+
+Therefore, TIMESTAMPTZ can be understood as a DATETIME type with time zone conversion functionality, where Doris automatically handles time zone conversions internally.
+
+### Time Zone Handling Rules
+
+- When input strings contain time zone information (e.g., `"2020-01-01 00:00:00 +03:00"`), Doris uses that time zone information for conversion.
+- When input strings do not contain time zone information (e.g., `"2020-01-01 00:00:00"`), Doris uses the current session's time zone setting for conversion.
+
+Since 4.1.5, output preserves historical IANA time zone offsets with second precision as `+HH:MM:SS`. Numeric offsets in input timestamps have different constraints from fixed session offsets: input hours must be below `24`, and minutes and seconds below `60`; fixed session offsets remain limited to `-12:00` through `+14:00`. Conversion to the session time zone fails if the resulting local year falls outside `0` through `9999`.
+
+Since 4.1.5, Catalogs always map external time-zone-aware timestamp types to `TIMESTAMPTZ`. Setting the compatibility property `enable.mapping.timestamp_tz=false` cannot restore the old `DATETIME` mapping. Arrow Flight SQL carries instants as Arrow Timestamp values with a time zone annotation; query schemas use the session time zone (`Z` is normalized to `UTC`). `DATETIME` uses a Timestamp without a time zone annotation.
+
+### Storage and Usage
+
+In Doris, a TIMESTAMPTZ type field occupies 8 bytes of storage space.
+
+TIMESTAMPTZ supports conversion to and from DATETIME and TIMESTAMP_NS, with appropriate time zone adjustments during conversion. TIMESTAMPTZ supports implicit conversion to DATETIME, allowing functions that do not directly support TIMESTAMPTZ to process this type of data. Converting TIMESTAMP_NS to TIMESTAMPTZ rounds from nanoseconds to the target TIMESTAMPTZ precision.
+
+## Examples
+
+```sql
+-- Using the current time zone (assuming +08:00) to convert a time string without time zone information
+select cast("2020-01-01 00:00:00" as timestamptz);
+```
+
+```text
++--------------------------------------------+
+| cast("2020-01-01 00:00:00" as timestamptz) |
++--------------------------------------------+
+| 2020-01-01 00:00:00 +08:00                 |
++--------------------------------------------+
+```
+
+```sql
+-- TIMESTAMPTZ supports microseconds
+select cast("2020-01-01 00:00:00.123456" as timestamptz(5));
+```
+
+```text
++------------------------------------------------------+
+| cast("2020-01-01 00:00:00.123456" as timestamptz(5)) |
++------------------------------------------------------+
+| 2020-01-01 00:00:00.12345 +08:00                     |
++------------------------------------------------------+
+```
+
+```sql
+-- Using a time string with time zone information
+select cast("2020-01-01 00:00:00 +03:00" as timestamptz);
+```
+
+```text
++---------------------------------------------------+
+| cast("2020-01-01 00:00:00 +03:00" as timestamptz) |
++---------------------------------------------------+
+| 2020-01-01 05:00:00 +08:00                        |
++---------------------------------------------------+
+```
+
+```sql
+-- Converting TIMESTAMPTZ to DATETIME (with time zone conversion based on current time zone)
+select cast(cast("2020-01-01 00:00:00 +03:00" as timestamptz) as datetime);
+```
+
+```text
++---------------------------------------------------------------------+
+| cast(cast("2020-01-01 00:00:00 +03:00" as timestamptz) as datetime) |
++---------------------------------------------------------------------+
+| 2020-01-01 05:00:00                                                 |
++---------------------------------------------------------------------+
+```
+
+```sql
+-- Converting DATETIME to TIMESTAMPTZ
+select cast(cast('2023-01-02 01:00:00' as datetime) as timestamptz);
+```
+
+```text
++--------------------------------------------------------------+
+| cast(cast('2023-01-02 01:00:00' as datetime) as timestamptz) |
++--------------------------------------------------------------+
+| 2023-01-02 01:00:00 +08:00                                   |
++--------------------------------------------------------------+
+```
+
+```sql
+-- Using TIMESTAMPTZ in functions
+select HOUR(cast("2020-01-01 00:00:00 +03:00" as timestamptz));
+```
+
+```text
++---------------------------------------------------------+
+| HOUR(cast("2020-01-01 00:00:00 +03:00" as timestamptz)) |
++---------------------------------------------------------+
+|                                                       5 |
++---------------------------------------------------------+
+```

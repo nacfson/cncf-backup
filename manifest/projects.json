@@ -534,6 +534,376 @@
           ]
         }
       ]
+    },
+    {
+      "slug": "kafka",
+      "name": "Apache Kafka",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://kafka.apache.org/documentation/",
+      "sources": [
+        {
+          "repo": "apache/kafka",
+          "branch": "trunk",
+          "paths": [
+            { "src": "docs", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "flink",
+      "name": "Apache Flink",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://nightlies.apache.org/flink/flink-docs-stable/",
+      "sources": [
+        {
+          "repo": "apache/flink",
+          "branch": "master",
+          "paths": [
+            { "src": "docs/content/docs", "dest": "" },
+            { "src": "docs/static/fig", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "spark",
+      "name": "Apache Spark",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://spark.apache.org/docs/latest/",
+      "sources": [
+        {
+          "repo": "apache/spark",
+          "branch": "master",
+          "paths": [
+            { "src": "docs", "dest": "" }
+          ],
+          "exclude_dirs": [".bundle", "_layouts", "_plugins", "_site", "js", "css"],
+          "exclude_files": ["Gemfile", "Gemfile.lock", "_config.yml"]
+        }
+      ]
+    },
+    {
+      "slug": "pulsar",
+      "name": "Apache Pulsar",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://pulsar.apache.org/docs/",
+      "sources": [
+        {
+          "repo": "apache/pulsar-site",
+          "branch": "main",
+          "paths": [
+            { "src": "docs", "dest": "" },
+            { "src": "static/assets", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "beam",
+      "name": "Apache Beam",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://beam.apache.org/documentation/",
+      "sources": [
+        {
+          "repo": "apache/beam",
+          "branch": "master",
+          "paths": [
+            { "src": "website/www/site/content/en/documentation", "dest": "" },
+            { "src": "website/www/site/static/images", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "airflow",
+      "name": "Apache Airflow",
+      "layer": "Data Orchestration",
+      "layer_slug": "data-orchestration",
+      "format": "rst",
+      "website": "https://airflow.apache.org/docs/",
+      "sources": [
+        {
+          "repo": "apache/airflow",
+          "branch": "main",
+          "paths": [
+            { "src": "airflow-core/docs", "dest": "airflow-core" },
+            { "src": "docker-stack-docs", "dest": "docker-stack" }
+          ],
+          "exclude_dirs": ["_exts", "empty_plugin", "templates"],
+          "exclude_files": ["conf.py"]
+        }
+      ]
+    },
+    {
+      "slug": "iceberg",
+      "name": "Apache Iceberg",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://iceberg.apache.org/docs/latest/",
+      "sources": [
+        {
+          "repo": "apache/iceberg",
+          "branch": "main",
+          "paths": [
+            { "src": "docs/docs", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "hudi",
+      "name": "Apache Hudi",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://hudi.apache.org/docs/overview",
+      "sources": [
+        {
+          "repo": "apache/hudi",
+          "branch": "asf-site",
+          "paths": [
+            { "src": "website/docs", "dest": "" },
+            { "src": "website/static/assets/images", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "paimon",
+      "name": "Apache Paimon",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://paimon.apache.org/docs/master/",
+      "sources": [
+        {
+          "repo": "apache/paimon",
+          "branch": "master",
+          "paths": [
+            { "src": "docs/docs", "dest": "" },
+            { "src": "docs/static/img", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "polaris",
+      "name": "Apache Polaris",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://polaris.apache.org/",
+      "sources": [
+        {
+          "repo": "apache/polaris",
+          "branch": "main",
+          "paths": [
+            { "src": "site/content/in-dev/unreleased", "dest": "docs" },
+            { "src": "site/content/guides", "dest": "guides" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "arrow",
+      "name": "Apache Arrow",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "rst",
+      "website": "https://arrow.apache.org/docs/",
+      "sources": [
+        {
+          "repo": "apache/arrow",
+          "branch": "main",
+          "paths": [
+            { "src": "docs/source", "dest": "" }
+          ],
+          "exclude_dirs": ["_templates", "_ext", "_static"],
+          "exclude_files": ["conf.py"]
+        }
+      ]
+    },
+    {
+      "slug": "snowflake",
+      "name": "Snowflake",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://docs.snowflake.com/",
+      "sources": [
+        {
+          "repo": "Snowflake-Labs/sfquickstarts",
+          "branch": "master",
+          "license_dest": "quickstarts/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "site/sfguides/src", "dest": "quickstarts" }
+          ],
+          "exclude_dirs": ["_TEMPLATE", "_archived", "_markdown-template", "assets"]
+        },
+        {
+          "repo": "snowflakedb/snowpark-python",
+          "branch": "main",
+          "license_dest": "snowpark-python/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "docs", "dest": "snowpark-python" }
+          ]
+        },
+        {
+          "repo": "snowflakedb/snowflake-cli",
+          "branch": "main",
+          "license_dest": "snowflake-cli/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "docs", "dest": "snowflake-cli" }
+          ]
+        },
+        {
+          "repo": "snowflakedb/terraform-provider-snowflake",
+          "branch": "main",
+          "license_dest": "terraform-provider/UPSTREAM_LICENSE",
+          "paths": [
+            { "src": "docs", "dest": "terraform-provider" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "druid",
+      "name": "Apache Druid",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://druid.apache.org/docs/latest/",
+      "sources": [
+        {
+          "repo": "apache/druid",
+          "branch": "master",
+          "paths": [
+            { "src": "docs", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "pinot",
+      "name": "Apache Pinot",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://docs.pinot.apache.org/",
+      "sources": [
+        {
+          "repo": "pinot-contrib/pinot-docs",
+          "branch": "latest",
+          "paths": [
+            { "src": "", "dest": "" },
+            { "src": ".gitbook/assets", "dest": "assets", "svg_only": true }
+          ],
+          "exclude_dirs": [".git", ".github", ".gitbook", ".cursor", "scripts", "node_modules"]
+        }
+      ]
+    },
+    {
+      "slug": "doris",
+      "name": "Apache Doris",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://doris.apache.org/docs/",
+      "sources": [
+        {
+          "repo": "apache/doris-website",
+          "branch": "master",
+          "paths": [
+            { "src": "docs", "dest": "" },
+            { "src": "static/images", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "superset",
+      "name": "Apache Superset",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://superset.apache.org/docs/",
+      "sources": [
+        {
+          "repo": "apache/superset",
+          "branch": "master",
+          "paths": [
+            { "src": "docs/docs", "dest": "user-guide" },
+            { "src": "docs/admin_docs", "dest": "admin-guide" },
+            { "src": "docs/static/img", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "cassandra",
+      "name": "Apache Cassandra",
+      "layer": "Distributed Storage & Coordination",
+      "layer_slug": "distributed-storage",
+      "format": "asciidoc",
+      "website": "https://cassandra.apache.org/doc/latest/",
+      "sources": [
+        {
+          "repo": "apache/cassandra",
+          "branch": "trunk",
+          "paths": [
+            { "src": "doc/modules/cassandra/pages", "dest": "cassandra" },
+            { "src": "doc/modules/ROOT/pages", "dest": "overview" },
+            { "src": "doc/modules/cassandra/images", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "zookeeper",
+      "name": "Apache ZooKeeper",
+      "layer": "Distributed Storage & Coordination",
+      "layer_slug": "distributed-storage",
+      "format": "markdown",
+      "website": "https://zookeeper.apache.org/documentation.html",
+      "sources": [
+        {
+          "repo": "apache/zookeeper",
+          "branch": "master",
+          "paths": [
+            { "src": "zookeeper-website/app/pages/_docs/docs/_mdx", "dest": "" }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "ozone",
+      "name": "Apache Ozone",
+      "layer": "Distributed Storage & Coordination",
+      "layer_slug": "distributed-storage",
+      "format": "markdown",
+      "website": "https://ozone.apache.org/docs/",
+      "sources": [
+        {
+          "repo": "apache/ozone-site",
+          "branch": "master",
+          "paths": [
+            { "src": "docs", "dest": "" },
+            { "src": "static", "dest": "images", "svg_only": true }
+          ]
+        }
+      ]
     }
   ]
 }

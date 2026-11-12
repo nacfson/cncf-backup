@@ -1,17 +1,18 @@
 {
   "schema_version": 1,
-  "synced_at_utc": "2026-11-12T02:21:52Z",
+  "synced_at_utc": "2026-11-12T02:57:23Z",
   "scope": "text-svg",
-  "project_count": 26,
+  "project_count": 45,
   "totals": {
-    "markdown": 6453,
-    "rst": 831,
-    "text_other": 80,
-    "code_config": 882,
-    "svg": 513,
+    "markdown": 12386,
+    "rst": 1247,
+    "asciidoc": 199,
+    "text_other": 93,
+    "code_config": 1048,
+    "svg": 1093,
     "media_other": 0,
-    "total_files": 8759,
-    "total_bytes": 85207145
+    "total_files": 16066,
+    "total_bytes": 184200497
   },
   "projects": [
     {
@@ -1181,6 +1182,885 @@
         "media_other": 0,
         "total_files": 268,
         "total_bytes": 2729410
+      }
+    },
+    {
+      "slug": "kafka",
+      "name": "Apache Kafka",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://kafka.apache.org/documentation/",
+      "local_path": "docs/data-streaming/kafka",
+      "sources": [
+        {
+          "repo": "apache/kafka",
+          "url": "https://github.com/apache/kafka",
+          "branch": "trunk",
+          "commit_sha": "0e675429a2d15605322ac6a8e3077433cbe15732",
+          "commit_date": "2026-11-11T21:53:43+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 114,
+          "bytes": 1635854
+        }
+      ],
+      "stats": {
+        "markdown": 112,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 2,
+        "media_other": 0,
+        "total_files": 114,
+        "total_bytes": 1635854
+      }
+    },
+    {
+      "slug": "flink",
+      "name": "Apache Flink",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://nightlies.apache.org/flink/flink-docs-stable/",
+      "local_path": "docs/data-streaming/flink",
+      "sources": [
+        {
+          "repo": "apache/flink",
+          "url": "https://github.com/apache/flink",
+          "branch": "master",
+          "commit_sha": "9f6afdeb1ad0e2e24f94070df5bab35bf00517a9",
+          "commit_date": "2026-11-12T09:37:41+08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs/content/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "docs/static/fig",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 478,
+          "bytes": 9766508
+        }
+      ],
+      "stats": {
+        "markdown": 405,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 73,
+        "media_other": 0,
+        "total_files": 478,
+        "total_bytes": 9766508
+      }
+    },
+    {
+      "slug": "spark",
+      "name": "Apache Spark",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://spark.apache.org/docs/latest/",
+      "local_path": "docs/data-streaming/spark",
+      "sources": [
+        {
+          "repo": "apache/spark",
+          "url": "https://github.com/apache/spark",
+          "branch": "master",
+          "commit_sha": "43744f5c5b918ffda501e3c964104f74f7b13b18",
+          "commit_date": "2026-11-12T11:14:30+09:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 260,
+          "bytes": 3643126
+        }
+      ],
+      "stats": {
+        "markdown": 254,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 6,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 260,
+        "total_bytes": 3643126
+      }
+    },
+    {
+      "slug": "pulsar",
+      "name": "Apache Pulsar",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://pulsar.apache.org/docs/",
+      "local_path": "docs/data-streaming/pulsar",
+      "sources": [
+        {
+          "repo": "apache/pulsar-site",
+          "url": "https://github.com/apache/pulsar-site",
+          "branch": "main",
+          "commit_sha": "08529bc57abee1d90716402df102223e330317e6",
+          "commit_date": "2026-11-12T09:35:06+08:00",
+          "resolved_version": null,
+          "license_file": null,
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/assets",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 337,
+          "bytes": 6224390
+        }
+      ],
+      "stats": {
+        "markdown": 260,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 77,
+        "media_other": 0,
+        "total_files": 337,
+        "total_bytes": 6224390
+      }
+    },
+    {
+      "slug": "beam",
+      "name": "Apache Beam",
+      "layer": "Data Streaming & Compute",
+      "layer_slug": "data-streaming",
+      "format": "markdown",
+      "website": "https://beam.apache.org/documentation/",
+      "local_path": "docs/data-streaming/beam",
+      "sources": [
+        {
+          "repo": "apache/beam",
+          "url": "https://github.com/apache/beam",
+          "branch": "master",
+          "commit_sha": "3a84bd59a42027598f4fe9649d51fe0a845176ea",
+          "commit_date": "2026-11-11T21:24:49-05:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "website/www/site/content/en/documentation",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "website/www/site/static/images",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 297,
+          "bytes": 6039912
+        }
+      ],
+      "stats": {
+        "markdown": 230,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 67,
+        "media_other": 0,
+        "total_files": 297,
+        "total_bytes": 6039912
+      }
+    },
+    {
+      "slug": "airflow",
+      "name": "Apache Airflow",
+      "layer": "Data Orchestration",
+      "layer_slug": "data-orchestration",
+      "format": "rst",
+      "website": "https://airflow.apache.org/docs/",
+      "local_path": "docs/data-orchestration/airflow",
+      "sources": [
+        {
+          "repo": "apache/airflow",
+          "url": "https://github.com/apache/airflow",
+          "branch": "main",
+          "commit_sha": "34c96509ebcb0e77aaf1066f754da8f7e86919da",
+          "commit_date": "2026-11-11T23:17:02+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "airflow-core/docs",
+              "local_subdir": "airflow-core",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "docker-stack-docs",
+              "local_subdir": "docker-stack",
+              "svg_only": false
+            }
+          ],
+          "files": 194,
+          "bytes": 2382505
+        }
+      ],
+      "stats": {
+        "markdown": 1,
+        "rst": 165,
+        "asciidoc": 0,
+        "text_other": 3,
+        "code_config": 23,
+        "svg": 2,
+        "media_other": 0,
+        "total_files": 194,
+        "total_bytes": 2382505
+      }
+    },
+    {
+      "slug": "iceberg",
+      "name": "Apache Iceberg",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://iceberg.apache.org/docs/latest/",
+      "local_path": "docs/data-lakehouse/iceberg",
+      "sources": [
+        {
+          "repo": "apache/iceberg",
+          "url": "https://github.com/apache/iceberg",
+          "branch": "main",
+          "commit_sha": "e31ea5f39b3e7d4a536cad3a4dbdc16dcf1e1553",
+          "commit_date": "2026-11-11T19:06:15-07:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 42,
+          "bytes": 700792
+        }
+      ],
+      "stats": {
+        "markdown": 42,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 42,
+        "total_bytes": 700792
+      }
+    },
+    {
+      "slug": "hudi",
+      "name": "Apache Hudi",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://hudi.apache.org/docs/overview",
+      "local_path": "docs/data-lakehouse/hudi",
+      "sources": [
+        {
+          "repo": "apache/hudi",
+          "url": "https://github.com/apache/hudi",
+          "branch": "asf-site",
+          "commit_sha": "56ebc227f0154c913ecdbc85ae186b0a0ca56083",
+          "commit_date": "2026-11-03T22:08:27+00:00",
+          "resolved_version": null,
+          "license_file": null,
+          "mappings": [
+            {
+              "upstream_path": "website/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "website/static/assets/images",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 77,
+          "bytes": 4078740
+        }
+      ],
+      "stats": {
+        "markdown": 74,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 3,
+        "media_other": 0,
+        "total_files": 77,
+        "total_bytes": 4078740
+      }
+    },
+    {
+      "slug": "paimon",
+      "name": "Apache Paimon",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://paimon.apache.org/docs/master/",
+      "local_path": "docs/data-lakehouse/paimon",
+      "sources": [
+        {
+          "repo": "apache/paimon",
+          "url": "https://github.com/apache/paimon",
+          "branch": "master",
+          "commit_sha": "68023de1160c16a67dd839c638ba817de23a9212",
+          "commit_date": "2026-11-12T10:32:49+08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs/docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "docs/static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 302,
+          "bytes": 2504540
+        }
+      ],
+      "stats": {
+        "markdown": 222,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 80,
+        "media_other": 0,
+        "total_files": 302,
+        "total_bytes": 2504540
+      }
+    },
+    {
+      "slug": "polaris",
+      "name": "Apache Polaris",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://polaris.apache.org/",
+      "local_path": "docs/data-lakehouse/polaris",
+      "sources": [
+        {
+          "repo": "apache/polaris",
+          "url": "https://github.com/apache/polaris",
+          "branch": "main",
+          "commit_sha": "02ba4b6d21594341ccd4c14c1c929a1da40d0485",
+          "commit_date": "2026-11-11T00:11:53-08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "site/content/in-dev/unreleased",
+              "local_subdir": "docs",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "site/content/guides",
+              "local_subdir": "guides",
+              "svg_only": false
+            }
+          ],
+          "files": 157,
+          "bytes": 900384
+        }
+      ],
+      "stats": {
+        "markdown": 128,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 29,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 157,
+        "total_bytes": 900384
+      }
+    },
+    {
+      "slug": "arrow",
+      "name": "Apache Arrow",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "rst",
+      "website": "https://arrow.apache.org/docs/",
+      "local_path": "docs/data-lakehouse/arrow",
+      "sources": [
+        {
+          "repo": "apache/arrow",
+          "url": "https://github.com/apache/arrow",
+          "branch": "main",
+          "commit_sha": "7eb865cd80793a23a6551ad136a33956783def0a",
+          "commit_date": "2026-11-12T11:44:58+09:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs/source",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 243,
+          "bytes": 3565435
+        }
+      ],
+      "stats": {
+        "markdown": 10,
+        "rst": 191,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 3,
+        "svg": 39,
+        "media_other": 0,
+        "total_files": 243,
+        "total_bytes": 3565435
+      }
+    },
+    {
+      "slug": "snowflake",
+      "name": "Snowflake",
+      "layer": "Data Lakehouse & Warehousing",
+      "layer_slug": "data-lakehouse",
+      "format": "markdown",
+      "website": "https://docs.snowflake.com/",
+      "local_path": "docs/data-lakehouse/snowflake",
+      "sources": [
+        {
+          "repo": "Snowflake-Labs/sfquickstarts",
+          "url": "https://github.com/Snowflake-Labs/sfquickstarts",
+          "branch": "master",
+          "commit_sha": "7b2a8eca216b40917cff83e7b9bd0524698b5a4b",
+          "commit_date": "2026-11-10T11:09:25-08:00",
+          "resolved_version": null,
+          "license_file": "quickstarts/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "site/sfguides/src",
+              "local_subdir": "quickstarts",
+              "svg_only": false
+            }
+          ],
+          "files": 939,
+          "bytes": 23450290
+        },
+        {
+          "repo": "snowflakedb/snowpark-python",
+          "url": "https://github.com/snowflakedb/snowpark-python",
+          "branch": "main",
+          "commit_sha": "d5e1f8dbb2dfaae8047da2192a35476d4f5fc21c",
+          "commit_date": "2026-11-10T22:28:51-08:00",
+          "resolved_version": null,
+          "license_file": "snowpark-python/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "snowpark-python",
+              "svg_only": false
+            }
+          ],
+          "files": 68,
+          "bytes": 635204
+        },
+        {
+          "repo": "snowflakedb/snowflake-cli",
+          "url": "https://github.com/snowflakedb/snowflake-cli",
+          "branch": "main",
+          "commit_sha": "9370ee1302970ce086bfe620b6ecee85d09ca66b",
+          "commit_date": "2026-11-10T13:20:58+00:00",
+          "resolved_version": null,
+          "license_file": "snowflake-cli/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "snowflake-cli",
+              "svg_only": false
+            }
+          ],
+          "files": 8,
+          "bytes": 78794
+        },
+        {
+          "repo": "snowflakedb/terraform-provider-snowflake",
+          "url": "https://github.com/snowflakedb/terraform-provider-snowflake",
+          "branch": "main",
+          "commit_sha": "8a7d19b230d48917f630cce54f147e3ed01d01f9",
+          "commit_date": "2026-11-05T18:22:26+00:00",
+          "resolved_version": null,
+          "license_file": "terraform-provider/UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": "terraform-provider",
+              "svg_only": false
+            }
+          ],
+          "files": 245,
+          "bytes": 2747453
+        }
+      ],
+      "stats": {
+        "markdown": 1092,
+        "rst": 60,
+        "asciidoc": 0,
+        "text_other": 10,
+        "code_config": 96,
+        "svg": 2,
+        "media_other": 0,
+        "total_files": 1260,
+        "total_bytes": 26911741
+      }
+    },
+    {
+      "slug": "druid",
+      "name": "Apache Druid",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://druid.apache.org/docs/latest/",
+      "local_path": "docs/data-analytics/druid",
+      "sources": [
+        {
+          "repo": "apache/druid",
+          "url": "https://github.com/apache/druid",
+          "branch": "master",
+          "commit_sha": "c951187c8bd59718b9dc3590bf1522e80567ec11",
+          "commit_date": "2026-11-11T13:08:33-06:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 269,
+          "bytes": 3648308
+        }
+      ],
+      "stats": {
+        "markdown": 267,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 1,
+        "media_other": 0,
+        "total_files": 269,
+        "total_bytes": 3648308
+      }
+    },
+    {
+      "slug": "pinot",
+      "name": "Apache Pinot",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://docs.pinot.apache.org/",
+      "local_path": "docs/data-analytics/pinot",
+      "sources": [
+        {
+          "repo": "pinot-contrib/pinot-docs",
+          "url": "https://github.com/pinot-contrib/pinot-docs",
+          "branch": "latest",
+          "commit_sha": "3bf13a86f53de7ad0548c37db76907020b022dce",
+          "commit_date": "2026-11-11T08:05:14-08:00",
+          "resolved_version": null,
+          "license_file": null,
+          "mappings": [
+            {
+              "upstream_path": "/",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": ".gitbook/assets",
+              "local_subdir": "assets",
+              "svg_only": true
+            }
+          ],
+          "files": 661,
+          "bytes": 7821281
+        }
+      ],
+      "stats": {
+        "markdown": 638,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 1,
+        "svg": 22,
+        "media_other": 0,
+        "total_files": 661,
+        "total_bytes": 7821281
+      }
+    },
+    {
+      "slug": "doris",
+      "name": "Apache Doris",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://doris.apache.org/docs/",
+      "local_path": "docs/data-analytics/doris",
+      "sources": [
+        {
+          "repo": "apache/doris-website",
+          "url": "https://github.com/apache/doris-website",
+          "branch": "master",
+          "commit_sha": "736c70f77feb116f6a031393f5ad45e84a8a6a1b",
+          "commit_date": "2026-11-10T22:09:05+08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static/images",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 1803,
+          "bytes": 12602941
+        }
+      ],
+      "stats": {
+        "markdown": 1682,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 121,
+        "media_other": 0,
+        "total_files": 1803,
+        "total_bytes": 12602941
+      }
+    },
+    {
+      "slug": "superset",
+      "name": "Apache Superset",
+      "layer": "Real-Time OLAP & Analytics",
+      "layer_slug": "data-analytics",
+      "format": "markdown",
+      "website": "https://superset.apache.org/docs/",
+      "local_path": "docs/data-analytics/superset",
+      "sources": [
+        {
+          "repo": "apache/superset",
+          "url": "https://github.com/apache/superset",
+          "branch": "master",
+          "commit_sha": "c0a86c7596f1587616370950ecf7059fa0d96793",
+          "commit_date": "2026-11-11T18:20:21-08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs/docs",
+              "local_subdir": "user-guide",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "docs/admin_docs",
+              "local_subdir": "admin-guide",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "docs/static/img",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 101,
+          "bytes": 1543758
+        }
+      ],
+      "stats": {
+        "markdown": 48,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 53,
+        "media_other": 0,
+        "total_files": 101,
+        "total_bytes": 1543758
+      }
+    },
+    {
+      "slug": "cassandra",
+      "name": "Apache Cassandra",
+      "layer": "Distributed Storage & Coordination",
+      "layer_slug": "distributed-storage",
+      "format": "asciidoc",
+      "website": "https://cassandra.apache.org/doc/latest/",
+      "local_path": "docs/distributed-storage/cassandra",
+      "sources": [
+        {
+          "repo": "apache/cassandra",
+          "url": "https://github.com/apache/cassandra",
+          "branch": "trunk",
+          "commit_sha": "197b73dcdf78f0554e7ae8fe411f4296b7875640",
+          "commit_date": "2026-11-11T10:32:17+01:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "doc/modules/cassandra/pages",
+              "local_subdir": "cassandra",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "doc/modules/ROOT/pages",
+              "local_subdir": "overview",
+              "svg_only": false
+            }
+          ],
+          "files": 201,
+          "bytes": 1667065
+        }
+      ],
+      "stats": {
+        "markdown": 0,
+        "rst": 0,
+        "asciidoc": 199,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 2,
+        "media_other": 0,
+        "total_files": 201,
+        "total_bytes": 1667065
+      }
+    },
+    {
+      "slug": "zookeeper",
+      "name": "Apache ZooKeeper",
+      "layer": "Distributed Storage & Coordination",
+      "layer_slug": "distributed-storage",
+      "format": "markdown",
+      "website": "https://zookeeper.apache.org/documentation.html",
+      "local_path": "docs/distributed-storage/zookeeper",
+      "sources": [
+        {
+          "repo": "apache/zookeeper",
+          "url": "https://github.com/apache/zookeeper",
+          "branch": "master",
+          "commit_sha": "5dd643fbf8c9cfec5b2fb00212235a5621abc6dd",
+          "commit_date": "2026-11-09T18:09:31+00:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "zookeeper-website/app/pages/_docs/docs/_mdx",
+              "local_subdir": ".",
+              "svg_only": false
+            }
+          ],
+          "files": 42,
+          "bytes": 515356
+        }
+      ],
+      "stats": {
+        "markdown": 35,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 7,
+        "svg": 0,
+        "media_other": 0,
+        "total_files": 42,
+        "total_bytes": 515356
+      }
+    },
+    {
+      "slug": "ozone",
+      "name": "Apache Ozone",
+      "layer": "Distributed Storage & Coordination",
+      "layer_slug": "distributed-storage",
+      "format": "markdown",
+      "website": "https://ozone.apache.org/docs/",
+      "local_path": "docs/distributed-storage/ozone",
+      "sources": [
+        {
+          "repo": "apache/ozone-site",
+          "url": "https://github.com/apache/ozone-site",
+          "branch": "master",
+          "commit_sha": "5cc01b799cd2fa40d7a2d5b5f2710bbc76c430f4",
+          "commit_date": "2026-11-07T09:09:23-08:00",
+          "resolved_version": null,
+          "license_file": "UPSTREAM_LICENSE",
+          "mappings": [
+            {
+              "upstream_path": "docs",
+              "local_subdir": ".",
+              "svg_only": false
+            },
+            {
+              "upstream_path": "static",
+              "local_subdir": "images",
+              "svg_only": true
+            }
+          ],
+          "files": 469,
+          "bytes": 2840716
+        }
+      ],
+      "stats": {
+        "markdown": 433,
+        "rst": 0,
+        "asciidoc": 0,
+        "text_other": 0,
+        "code_config": 0,
+        "svg": 36,
+        "media_other": 0,
+        "total_files": 469,
+        "total_bytes": 2840716
       }
     }
   ]

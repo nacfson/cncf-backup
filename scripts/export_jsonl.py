@@ -31,7 +31,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCK_MANIFEST = REPO_ROOT / "manifest" / "lock.json"
 
-PROSE_EXTS = {".md", ".mdx", ".rst", ".txt"}
+PROSE_EXTS = {".md", ".mdx", ".rst", ".adoc", ".txt"}
 CODE_EXTS = {
     ".yaml", ".yml", ".json", ".toml", ".hcl", ".rego", ".proto",
     ".sh", ".bash", ".py", ".go", ".js", ".ts", ".conf", ".ini",
@@ -58,6 +58,10 @@ def extract_title(text: str, ext: str, fallback: str) -> str:
 
     if ext in (".md", ".mdx"):
         m = re.search(r"^#\s+(.+?)\s*$", text, re.M)
+        if m:
+            return m.group(1).strip()
+    elif ext == ".adoc":
+        m = re.search(r"^=\s+(.+?)\s*$", text, re.M)
         if m:
             return m.group(1).strip()
     elif ext == ".rst":
@@ -146,7 +150,14 @@ def main() -> int:
                 rel_to_proj = file_path.relative_to(proj_dir).as_posix()
                 rel_to_repo = file_path.relative_to(REPO_ROOT).as_posix()
                 upstream_url, sha = resolve_upstream_blob(proj, rel_to_proj)
-                fmt = "rst" if ext == ".rst" else ("markdown" if ext in (".md", ".mdx", ".txt") else "code")
+                if ext == ".rst":
+                    fmt = "rst"
+                elif ext == ".adoc":
+                    fmt = "asciidoc"
+                elif ext in (".md", ".mdx", ".txt"):
+                    fmt = "markdown"
+                else:
+                    fmt = "code"
                 title = extract_title(content, ext, file_path.stem)
 
                 record = {

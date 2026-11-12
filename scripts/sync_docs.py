@@ -42,7 +42,7 @@ README_PATH = REPO_ROOT / "README.md"
 MAX_FILE_BYTES = 45 * 1024 * 1024  # Stay safely below GitHub's 50 MB warning / 100 MB hard limit
 MAX_SVG_BYTES = 1_000_000          # Skip multi-MB base64-raster-embedded .drawio.svg dumps in text-svg mode
 
-DOC_EXTS = {".md", ".mdx", ".rst", ".txt"}
+DOC_EXTS = {".md", ".mdx", ".rst", ".adoc", ".txt"}
 CODE_CONFIG_EXTS = {
     ".yaml", ".yml", ".json", ".toml", ".hcl", ".rego", ".proto",
     ".sh", ".bash", ".py", ".go", ".js", ".ts", ".conf", ".ini",
@@ -212,6 +212,7 @@ def copy_filtered_tree(
     stats = {
         "markdown": 0,
         "rst": 0,
+        "asciidoc": 0,
         "text_other": 0,
         "code_config": 0,
         "svg": 0,
@@ -284,8 +285,18 @@ def copy_filtered_tree(
                     text_data,
                 )
                 sanitized = re.sub(
+                    r"https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[A-Za-z0-9]{16,}",
+                    "https://hooks.slack.com/services/T00000000/B00000000/EXAMPLE_REDACTED_WEBHOOK",
+                    sanitized,
+                )
+                sanitized = re.sub(
                     r"\bgh([pousr])_[A-Za-z0-9]{36,}\b",
                     r"gh\1_EXAMPLE_REDACTED_DOC_TOKEN",
+                    sanitized,
+                )
+                sanitized = re.sub(
+                    r"\bgithub_pat_[A-Za-z0-9_]{40,}\b",
+                    "github_pat_EXAMPLE_REDACTED_DOC_TOKEN",
                     sanitized,
                 )
                 sanitized = re.sub(
@@ -296,6 +307,16 @@ def copy_filtered_tree(
                 sanitized = re.sub(
                     r"\bs\.(?=[A-Za-z0-9]{24}\b)(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])[A-Za-z0-9]{24}\b",
                     "s.EXAMPLE_REDACTED_VAULT_TOKEN",
+                    sanitized,
+                )
+                sanitized = re.sub(
+                    r"\bsk-(proj|ant|live)-[A-Za-z0-9_-]{24,}\b",
+                    r"sk-\1-EXAMPLE_REDACTED_DOC_TOKEN",
+                    sanitized,
+                )
+                sanitized = re.sub(
+                    r"\bhf_[A-Za-z0-9]{30,}\b",
+                    "hf_EXAMPLE_REDACTED_DOC_TOKEN",
                     sanitized,
                 )
                 if sanitized != text_data:
@@ -313,6 +334,8 @@ def copy_filtered_tree(
                 stats["markdown"] += 1
             elif ext == ".rst":
                 stats["rst"] += 1
+            elif ext == ".adoc":
+                stats["asciidoc"] += 1
             elif ext == ".txt":
                 stats["text_other"] += 1
             elif ext in CODE_CONFIG_EXTS:
@@ -352,6 +375,7 @@ def sync_project(project: dict[str, Any], scope: str, tmp_base: Path) -> dict[st
     agg_stats = {
         "markdown": 0,
         "rst": 0,
+        "asciidoc": 0,
         "text_other": 0,
         "code_config": 0,
         "svg": 0,
@@ -483,22 +507,24 @@ def generate_readme(lock_data: dict[str, Any]) -> str:
     total_bytes = lock_data["totals"]["total_bytes"]
     total_md = lock_data["totals"]["markdown"]
     total_rst = lock_data["totals"]["rst"]
+    total_adoc = lock_data["totals"].get("asciidoc", 0)
     total_code = lock_data["totals"]["code_config"]
     total_svg = lock_data["totals"]["svg"]
     synced_at = lock_data["synced_at_utc"]
     scope = lock_data["scope"]
+    num_layers = len({p["layer_slug"] for p in projects})
 
     lines = [
-        "# CNCF Graduated Projects Documentation Backup",
+        "# Cloud-Native, Apache Data Ecosystem & Snowflake Documentation Corpus",
         "",
-        "Consolidated, version-pinned documentation corpus covering **all 26 CNCF Graduated projects** across 7 architectural layers, structured for learning, offline reference, and Retrieval-Augmented Generation (RAG).",
+        f"Consolidated, version-pinned documentation corpus covering **{len(projects)} flagship projects** (**26 CNCF Graduated**, **18 Apache Series**, and **Snowflake**) across **{num_layers} architectural layers**, structured for learning, offline reference, and Retrieval-Augmented Generation (RAG).",
         "",
         "## Corpus Summary",
         "",
         f"- **Last synced (UTC):** `{synced_at}`",
         f"- **Backup scope:** `{scope}` (prose docs + config/code examples + vector `.svg` architecture diagrams; latest stable version per project)",
         f"- **Total projects:** `{len(projects)}` (synced from `{sum(len(p['sources']) for p in projects)}` upstream GitHub repositories)",
-        f"- **Total files:** `{total_files:,}` (`{total_md:,}` Markdown/MDX, `{total_rst:,}` reStructuredText, `{total_code:,}` YAML/JSON/code examples, `{total_svg:,}` SVG diagrams)",
+        f"- **Total files:** `{total_files:,}` (`{total_md:,}` Markdown/MDX, `{total_rst:,}` reStructuredText, `{total_adoc:,}` AsciiDoc, `{total_code:,}` YAML/JSON/SQL/code examples, `{total_svg:,}` SVG diagrams)",
         f"- **Uncompressed corpus size:** `{format_mb(total_bytes)}`",
         "",
         "## Directory Layout",
@@ -512,12 +538,18 @@ def generate_readme(lock_data: dict[str, Any]) -> str:
         "│   ├── gitops-packaging/     # Helm, Argo (CD, Workflows, Rollouts), Flux",
         "│   ├── security-identity/    # SPIFFE/SPIRE, OPA, Kyverno, cert-manager, Falco, Harbor",
         "│   ├── storage-messaging/    # Rook, NATS",
-        "│   └── ai-ml/                # Kubeflow",
+        "│   ├── ai-ml/                # Kubeflow",
+        "│   ├── data-streaming/       # Apache Kafka, Flink, Spark, Pulsar, Beam",
+        "│   ├── data-orchestration/   # Apache Airflow",
+        "│   ├── data-lakehouse/       # Apache Iceberg, Hudi, Paimon, Polaris, Arrow, Snowflake",
+        "│   ├── data-analytics/       # Apache Druid, Pinot, Doris, Superset",
+        "│   └── distributed-storage/  # Apache Cassandra, ZooKeeper, Ozone",
         "├── manifest/",
         "│   ├── projects.json         # Declarative source definitions & dynamic version resolvers",
         "│   └── lock.json             # Exact upstream commit SHAs, timestamps, mappings & file counts",
         "└── scripts/",
         "    ├── sync_docs.py          # Repeatable parallel sparse-checkout sync tool (Python 3 stdlib)",
+        "    ├── sync_snowflake_llms.py# Pull Snowflake core docs via docs.snowflake.com/llms.txt (.md)",
         "    └── export_jsonl.py       # Export prose/code docs + pinned GitHub URLs to JSONL for RAG",
         "```",
         "",
@@ -538,7 +570,12 @@ def generate_readme(lock_data: dict[str, Any]) -> str:
             src_parts.append(f"[`{repo}`](https://github.com/{repo}) (`{path_label}`)")
             sha_parts.append(f"[`{short_sha}`](https://github.com/{repo}/tree/{s['commit_sha']})")
 
-        fmt_label = "reStructuredText (`.rst`)" if p["format"] == "rst" else "Markdown"
+        if p["format"] == "rst":
+            fmt_label = "reStructuredText (`.rst`)"
+        elif p["format"] == "asciidoc":
+            fmt_label = "AsciiDoc (`.adoc`)"
+        else:
+            fmt_label = "Markdown"
         local_link = f"[`{p['local_path']}/`]({p['local_path']})"
         lines.append(
             f"| {p['layer']} | **{p['name']}** | {local_link} | "
@@ -553,11 +590,15 @@ def generate_readme(lock_data: dict[str, Any]) -> str:
         "`scripts/sync_docs.py` uses `git clone --depth 1 --filter=blob:none --sparse` with no third-party Python dependencies:",
         "",
         "```bash",
-        "# Re-sync all 26 CNCF Graduated projects (default scope: text-svg)",
+        "# Re-sync all 45 CNCF, Apache & Snowflake GitHub projects (default scope: text-svg)",
         "python3 scripts/sync_docs.py",
         "",
         "# Re-sync specific project(s) only",
-        "python3 scripts/sync_docs.py --project kubernetes --project cilium",
+        "python3 scripts/sync_docs.py --project kafka --project flink --project iceberg",
+        "",
+        "# Optional: pull Snowflake's core docs.snowflake.com Markdown pages via llms.txt",
+        "# (run on any machine with direct HTTPS access to docs.snowflake.com)",
+        "python3 scripts/sync_snowflake_llms.py --section sql-reference --section user-guide",
         "",
         "# Switch backup scope if desired (text-only | text-svg | all-media)",
         "python3 scripts/sync_docs.py --scope text-only",
@@ -566,17 +607,18 @@ def generate_readme(lock_data: dict[str, Any]) -> str:
         "## Using This Corpus for Retrieval / RAG",
         "",
         "```bash",
-        "# Export all prose docs (.md/.mdx/.rst/.txt) with extracted titles & pinned GitHub blob URLs",
+        "# Export all prose docs (.md/.mdx/.rst/.adoc/.txt) with extracted titles & pinned GitHub blob URLs",
         "python3 scripts/export_jsonl.py --output corpus.jsonl",
         "",
-        "# Include standalone YAML/JSON/code example files as well",
+        "# Include standalone YAML/JSON/SQL/code example files as well",
         "python3 scripts/export_jsonl.py --include-code --output corpus_with_code.jsonl",
         "```",
         "",
-        "1. **Provenance & deep-linking (`manifest/lock.json`):** Every project entry in `manifest/lock.json` records its exact `commit_sha`, `upstream_path`, and `local_subdir`, allowing your ingestion pipeline to attach canonical GitHub source URLs and CNCF layer metadata to each chunk.",
+        "1. **Provenance & deep-linking (`manifest/lock.json`):** Every project entry in `manifest/lock.json` records its exact `commit_sha`, `upstream_path`, and `local_subdir`, allowing your ingestion pipeline to attach canonical GitHub source URLs and architectural layer metadata to each chunk.",
         "2. **File formats:**",
-        "   - **Markdown / MDX (`.md`, `.mdx`):** 24 of 26 projects. Note that Hugo/Docusaurus/Starlight frontmatter (`--- ... ---`) at the top of files contains clean `title`, `description`, and `weight` metadata useful for hybrid search.",
-        "   - **reStructuredText (`.rst`):** Cilium and Envoy use Sphinx `.rst` directives (`.. code-block::`, `.. note::`, `:ref:`).",
+        "   - **Markdown / MDX (`.md`, `.mdx`):** Majority of CNCF, Apache, and Snowflake docs. Frontmatter (`--- ... ---`) at the top of files contains clean `title`, `description`, and `weight` metadata useful for hybrid search.",
+        "   - **reStructuredText (`.rst`):** Cilium, Envoy, Apache Airflow, and Apache Arrow use Sphinx `.rst` directives (`.. code-block::`, `.. note::`, `:ref:`).",
+        "   - **AsciiDoc (`.adoc`):** Apache Cassandra (and parts of Apache Polaris) use Antora/AsciiDoc (`= Title`, `[source,cql]`).",
         "3. **Licenses:** Upstream `UPSTREAM_LICENSE*` files are preserved inside each project directory alongside the documentation.",
         "",
     ])
@@ -584,7 +626,7 @@ def generate_readme(lock_data: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Sync CNCF Graduated Project docs.")
+    parser = argparse.ArgumentParser(description="Sync CNCF, Apache & Snowflake docs.")
     parser.add_argument(
         "--scope",
         choices=["text-only", "text-svg", "all-media"],
@@ -659,6 +701,7 @@ def main() -> int:
     totals = {
         "markdown": 0,
         "rst": 0,
+        "asciidoc": 0,
         "text_other": 0,
         "code_config": 0,
         "svg": 0,
@@ -668,7 +711,7 @@ def main() -> int:
     }
     for rec in ordered_records:
         for k in totals:
-            totals[k] += rec["stats"][k]
+            totals[k] += rec["stats"].get(k, 0)
 
     lock_data = {
         "schema_version": 1,

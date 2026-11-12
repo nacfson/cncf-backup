@@ -1,14 +1,14 @@
-# CNCF Graduated Projects Documentation Backup
+# Cloud-Native, Apache Data Ecosystem & Snowflake Documentation Corpus
 
-Consolidated, version-pinned documentation corpus covering **all 26 CNCF Graduated projects** across 7 architectural layers, structured for learning, offline reference, and Retrieval-Augmented Generation (RAG).
+Consolidated, version-pinned documentation corpus covering **45 flagship projects** (**26 CNCF Graduated**, **18 Apache Series**, and **Snowflake**) across **12 architectural layers**, structured for learning, offline reference, and Retrieval-Augmented Generation (RAG).
 
 ## Corpus Summary
 
-- **Last synced (UTC):** `2026-11-12T02:21:52Z`
+- **Last synced (UTC):** `2026-11-12T02:57:23Z`
 - **Backup scope:** `text-svg` (prose docs + config/code examples + vector `.svg` architecture diagrams; latest stable version per project)
-- **Total projects:** `26` (synced from `31` upstream GitHub repositories)
-- **Total files:** `8,759` (`6,453` Markdown/MDX, `831` reStructuredText, `882` YAML/JSON/code examples, `513` SVG diagrams)
-- **Uncompressed corpus size:** `85.21 MB`
+- **Total projects:** `45` (synced from `53` upstream GitHub repositories)
+- **Total files:** `16,066` (`12,386` Markdown/MDX, `1,247` reStructuredText, `199` AsciiDoc, `1,048` YAML/JSON/SQL/code examples, `1,093` SVG diagrams)
+- **Uncompressed corpus size:** `184.20 MB`
 
 ## Directory Layout
 
@@ -21,12 +21,18 @@ cncf-backup/
 │   ├── gitops-packaging/     # Helm, Argo (CD, Workflows, Rollouts), Flux
 │   ├── security-identity/    # SPIFFE/SPIRE, OPA, Kyverno, cert-manager, Falco, Harbor
 │   ├── storage-messaging/    # Rook, NATS
-│   └── ai-ml/                # Kubeflow
+│   ├── ai-ml/                # Kubeflow
+│   ├── data-streaming/       # Apache Kafka, Flink, Spark, Pulsar, Beam
+│   ├── data-orchestration/   # Apache Airflow
+│   ├── data-lakehouse/       # Apache Iceberg, Hudi, Paimon, Polaris, Arrow, Snowflake
+│   ├── data-analytics/       # Apache Druid, Pinot, Doris, Superset
+│   └── distributed-storage/  # Apache Cassandra, ZooKeeper, Ozone
 ├── manifest/
 │   ├── projects.json         # Declarative source definitions & dynamic version resolvers
 │   └── lock.json             # Exact upstream commit SHAs, timestamps, mappings & file counts
 └── scripts/
     ├── sync_docs.py          # Repeatable parallel sparse-checkout sync tool (Python 3 stdlib)
+    ├── sync_snowflake_llms.py# Pull Snowflake core docs via docs.snowflake.com/llms.txt (.md)
     └── export_jsonl.py       # Export prose/code docs + pinned GitHub URLs to JSONL for RAG
 ```
 
@@ -60,17 +66,40 @@ cncf-backup/
 | Storage & Messaging | **Rook** | [`docs/storage-messaging/rook/`](docs/storage-messaging/rook) | [`rook/rook`](https://github.com/rook/rook) (`Documentation`) | [`719f345`](https://github.com/rook/rook/tree/719f345e220db7b9617c98a43f74160fa039cc7d) | Markdown | 98 | 1.19 MB |
 | Storage & Messaging | **NATS** | [`docs/storage-messaging/nats/`](docs/storage-messaging/nats) | [`nats-io/nats.docs`](https://github.com/nats-io/nats.docs) (`/`) | [`f115bec`](https://github.com/nats-io/nats.docs/tree/f115becf6563e3bbe16bb94cbf87bfceb84199c1) | Markdown | 209 | 1.65 MB |
 | AI / ML | **Kubeflow** | [`docs/ai-ml/kubeflow/`](docs/ai-ml/kubeflow) | [`kubeflow/website`](https://github.com/kubeflow/website) (`content/en/docs`) | [`a7b22c9`](https://github.com/kubeflow/website/tree/a7b22c962aeddfecb68d6cf747f8a1bbb0543018) | Markdown | 268 | 2.73 MB |
+| Data Streaming & Compute | **Apache Kafka** | [`docs/data-streaming/kafka/`](docs/data-streaming/kafka) | [`apache/kafka`](https://github.com/apache/kafka) (`docs`) | [`0e67542`](https://github.com/apache/kafka/tree/0e675429a2d15605322ac6a8e3077433cbe15732) | Markdown | 114 | 1.64 MB |
+| Data Streaming & Compute | **Apache Flink** | [`docs/data-streaming/flink/`](docs/data-streaming/flink) | [`apache/flink`](https://github.com/apache/flink) (`docs/content/docs`) | [`9f6afde`](https://github.com/apache/flink/tree/9f6afdeb1ad0e2e24f94070df5bab35bf00517a9) | Markdown | 478 | 9.77 MB |
+| Data Streaming & Compute | **Apache Spark** | [`docs/data-streaming/spark/`](docs/data-streaming/spark) | [`apache/spark`](https://github.com/apache/spark) (`docs`) | [`43744f5`](https://github.com/apache/spark/tree/43744f5c5b918ffda501e3c964104f74f7b13b18) | Markdown | 260 | 3.64 MB |
+| Data Streaming & Compute | **Apache Pulsar** | [`docs/data-streaming/pulsar/`](docs/data-streaming/pulsar) | [`apache/pulsar-site`](https://github.com/apache/pulsar-site) (`docs`) | [`08529bc`](https://github.com/apache/pulsar-site/tree/08529bc57abee1d90716402df102223e330317e6) | Markdown | 337 | 6.22 MB |
+| Data Streaming & Compute | **Apache Beam** | [`docs/data-streaming/beam/`](docs/data-streaming/beam) | [`apache/beam`](https://github.com/apache/beam) (`website/www/site/content/en/documentation`) | [`3a84bd5`](https://github.com/apache/beam/tree/3a84bd59a42027598f4fe9649d51fe0a845176ea) | Markdown | 297 | 6.04 MB |
+| Data Orchestration | **Apache Airflow** | [`docs/data-orchestration/airflow/`](docs/data-orchestration/airflow) | [`apache/airflow`](https://github.com/apache/airflow) (`airflow-core/docs, docker-stack-docs`) | [`34c9650`](https://github.com/apache/airflow/tree/34c96509ebcb0e77aaf1066f754da8f7e86919da) | reStructuredText (`.rst`) | 194 | 2.38 MB |
+| Data Lakehouse & Warehousing | **Apache Iceberg** | [`docs/data-lakehouse/iceberg/`](docs/data-lakehouse/iceberg) | [`apache/iceberg`](https://github.com/apache/iceberg) (`docs/docs`) | [`e31ea5f`](https://github.com/apache/iceberg/tree/e31ea5f39b3e7d4a536cad3a4dbdc16dcf1e1553) | Markdown | 42 | 0.70 MB |
+| Data Lakehouse & Warehousing | **Apache Hudi** | [`docs/data-lakehouse/hudi/`](docs/data-lakehouse/hudi) | [`apache/hudi`](https://github.com/apache/hudi) (`website/docs`) | [`56ebc22`](https://github.com/apache/hudi/tree/56ebc227f0154c913ecdbc85ae186b0a0ca56083) | Markdown | 77 | 4.08 MB |
+| Data Lakehouse & Warehousing | **Apache Paimon** | [`docs/data-lakehouse/paimon/`](docs/data-lakehouse/paimon) | [`apache/paimon`](https://github.com/apache/paimon) (`docs/docs`) | [`68023de`](https://github.com/apache/paimon/tree/68023de1160c16a67dd839c638ba817de23a9212) | Markdown | 302 | 2.50 MB |
+| Data Lakehouse & Warehousing | **Apache Polaris** | [`docs/data-lakehouse/polaris/`](docs/data-lakehouse/polaris) | [`apache/polaris`](https://github.com/apache/polaris) (`site/content/in-dev/unreleased, site/content/guides`) | [`02ba4b6`](https://github.com/apache/polaris/tree/02ba4b6d21594341ccd4c14c1c929a1da40d0485) | Markdown | 157 | 0.90 MB |
+| Data Lakehouse & Warehousing | **Apache Arrow** | [`docs/data-lakehouse/arrow/`](docs/data-lakehouse/arrow) | [`apache/arrow`](https://github.com/apache/arrow) (`docs/source`) | [`7eb865c`](https://github.com/apache/arrow/tree/7eb865cd80793a23a6551ad136a33956783def0a) | reStructuredText (`.rst`) | 243 | 3.57 MB |
+| Data Lakehouse & Warehousing | **Snowflake** | [`docs/data-lakehouse/snowflake/`](docs/data-lakehouse/snowflake) | [`Snowflake-Labs/sfquickstarts`](https://github.com/Snowflake-Labs/sfquickstarts) (`site/sfguides/src`)<br>[`snowflakedb/snowpark-python`](https://github.com/snowflakedb/snowpark-python) (`docs`)<br>[`snowflakedb/snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) (`docs`)<br>[`snowflakedb/terraform-provider-snowflake`](https://github.com/snowflakedb/terraform-provider-snowflake) (`docs`) | [`7b2a8ec`](https://github.com/Snowflake-Labs/sfquickstarts/tree/7b2a8eca216b40917cff83e7b9bd0524698b5a4b)<br>[`d5e1f8d`](https://github.com/snowflakedb/snowpark-python/tree/d5e1f8dbb2dfaae8047da2192a35476d4f5fc21c)<br>[`9370ee1`](https://github.com/snowflakedb/snowflake-cli/tree/9370ee1302970ce086bfe620b6ecee85d09ca66b)<br>[`8a7d19b`](https://github.com/snowflakedb/terraform-provider-snowflake/tree/8a7d19b230d48917f630cce54f147e3ed01d01f9) | Markdown | 1,260 | 26.91 MB |
+| Real-Time OLAP & Analytics | **Apache Druid** | [`docs/data-analytics/druid/`](docs/data-analytics/druid) | [`apache/druid`](https://github.com/apache/druid) (`docs`) | [`c951187`](https://github.com/apache/druid/tree/c951187c8bd59718b9dc3590bf1522e80567ec11) | Markdown | 269 | 3.65 MB |
+| Real-Time OLAP & Analytics | **Apache Pinot** | [`docs/data-analytics/pinot/`](docs/data-analytics/pinot) | [`pinot-contrib/pinot-docs`](https://github.com/pinot-contrib/pinot-docs) (`/`) | [`3bf13a8`](https://github.com/pinot-contrib/pinot-docs/tree/3bf13a86f53de7ad0548c37db76907020b022dce) | Markdown | 661 | 7.82 MB |
+| Real-Time OLAP & Analytics | **Apache Doris** | [`docs/data-analytics/doris/`](docs/data-analytics/doris) | [`apache/doris-website`](https://github.com/apache/doris-website) (`docs`) | [`736c70f`](https://github.com/apache/doris-website/tree/736c70f77feb116f6a031393f5ad45e84a8a6a1b) | Markdown | 1,803 | 12.60 MB |
+| Real-Time OLAP & Analytics | **Apache Superset** | [`docs/data-analytics/superset/`](docs/data-analytics/superset) | [`apache/superset`](https://github.com/apache/superset) (`docs/docs, docs/admin_docs`) | [`c0a86c7`](https://github.com/apache/superset/tree/c0a86c7596f1587616370950ecf7059fa0d96793) | Markdown | 101 | 1.54 MB |
+| Distributed Storage & Coordination | **Apache Cassandra** | [`docs/distributed-storage/cassandra/`](docs/distributed-storage/cassandra) | [`apache/cassandra`](https://github.com/apache/cassandra) (`doc/modules/cassandra/pages, doc/modules/ROOT/pages`) | [`197b73d`](https://github.com/apache/cassandra/tree/197b73dcdf78f0554e7ae8fe411f4296b7875640) | AsciiDoc (`.adoc`) | 201 | 1.67 MB |
+| Distributed Storage & Coordination | **Apache ZooKeeper** | [`docs/distributed-storage/zookeeper/`](docs/distributed-storage/zookeeper) | [`apache/zookeeper`](https://github.com/apache/zookeeper) (`zookeeper-website/app/pages/_docs/docs/_mdx`) | [`5dd643f`](https://github.com/apache/zookeeper/tree/5dd643fbf8c9cfec5b2fb00212235a5621abc6dd) | Markdown | 42 | 0.52 MB |
+| Distributed Storage & Coordination | **Apache Ozone** | [`docs/distributed-storage/ozone/`](docs/distributed-storage/ozone) | [`apache/ozone-site`](https://github.com/apache/ozone-site) (`docs`) | [`5cc01b7`](https://github.com/apache/ozone-site/tree/5cc01b799cd2fa40d7a2d5b5f2710bbc76c430f4) | Markdown | 469 | 2.84 MB |
 
 ## Keeping the Backup Updated
 
 `scripts/sync_docs.py` uses `git clone --depth 1 --filter=blob:none --sparse` with no third-party Python dependencies:
 
 ```bash
-# Re-sync all 26 CNCF Graduated projects (default scope: text-svg)
+# Re-sync all 45 CNCF, Apache & Snowflake GitHub projects (default scope: text-svg)
 python3 scripts/sync_docs.py
 
 # Re-sync specific project(s) only
-python3 scripts/sync_docs.py --project kubernetes --project cilium
+python3 scripts/sync_docs.py --project kafka --project flink --project iceberg
+
+# Optional: pull Snowflake's core docs.snowflake.com Markdown pages via llms.txt
+# (run on any machine with direct HTTPS access to docs.snowflake.com)
+python3 scripts/sync_snowflake_llms.py --section sql-reference --section user-guide
 
 # Switch backup scope if desired (text-only | text-svg | all-media)
 python3 scripts/sync_docs.py --scope text-only
@@ -79,15 +108,16 @@ python3 scripts/sync_docs.py --scope text-only
 ## Using This Corpus for Retrieval / RAG
 
 ```bash
-# Export all prose docs (.md/.mdx/.rst/.txt) with extracted titles & pinned GitHub blob URLs
+# Export all prose docs (.md/.mdx/.rst/.adoc/.txt) with extracted titles & pinned GitHub blob URLs
 python3 scripts/export_jsonl.py --output corpus.jsonl
 
-# Include standalone YAML/JSON/code example files as well
+# Include standalone YAML/JSON/SQL/code example files as well
 python3 scripts/export_jsonl.py --include-code --output corpus_with_code.jsonl
 ```
 
-1. **Provenance & deep-linking (`manifest/lock.json`):** Every project entry in `manifest/lock.json` records its exact `commit_sha`, `upstream_path`, and `local_subdir`, allowing your ingestion pipeline to attach canonical GitHub source URLs and CNCF layer metadata to each chunk.
+1. **Provenance & deep-linking (`manifest/lock.json`):** Every project entry in `manifest/lock.json` records its exact `commit_sha`, `upstream_path`, and `local_subdir`, allowing your ingestion pipeline to attach canonical GitHub source URLs and architectural layer metadata to each chunk.
 2. **File formats:**
-   - **Markdown / MDX (`.md`, `.mdx`):** 24 of 26 projects. Note that Hugo/Docusaurus/Starlight frontmatter (`--- ... ---`) at the top of files contains clean `title`, `description`, and `weight` metadata useful for hybrid search.
-   - **reStructuredText (`.rst`):** Cilium and Envoy use Sphinx `.rst` directives (`.. code-block::`, `.. note::`, `:ref:`).
+   - **Markdown / MDX (`.md`, `.mdx`):** Majority of CNCF, Apache, and Snowflake docs. Frontmatter (`--- ... ---`) at the top of files contains clean `title`, `description`, and `weight` metadata useful for hybrid search.
+   - **reStructuredText (`.rst`):** Cilium, Envoy, Apache Airflow, and Apache Arrow use Sphinx `.rst` directives (`.. code-block::`, `.. note::`, `:ref:`).
+   - **AsciiDoc (`.adoc`):** Apache Cassandra (and parts of Apache Polaris) use Antora/AsciiDoc (`= Title`, `[source,cql]`).
 3. **Licenses:** Upstream `UPSTREAM_LICENSE*` files are preserved inside each project directory alongside the documentation.

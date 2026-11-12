@@ -1,0 +1,8 @@
+# Python & temporary sync artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.sync-tmp/
+.DS_Store
+*.jsonl

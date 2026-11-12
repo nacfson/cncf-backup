@@ -1,0 +1,30 @@
+# local
+
+The `local` metrics plugin stores the values on memory.
+
+## Parameters
+
+### `default_labels`
+
+Specifies the default labels for the metrics. \(default: `{agent: "Fluentd", hostname: "#{Socket.gethostname}"}`\)
+
+### `labels`
+
+Specifies other custom labels for the metrics. \(default: `{}`\)
+
+## Example
+
+With this configuration:
+
+```text
+<system>
+  <metrics>
+    @type local
+  </metrics>
+</system>
+```
+
+The above configuration will save the internal metrics for plugins on memory. As a result, you can retrieve metrics from memory and also you can replace with your custom metrics plugin.
+
+Actually, @type local metrics plugin has equivalent functionality for previous single value based Ruby instance variables.
+This behavior will be changed by other 3rd party plugins.

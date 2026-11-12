@@ -1,0 +1,290 @@
+# Server plugin: NodeAttestor "aws_iid"
+
+*Must be used in conjunction with the [agent-side aws_iid plugin](plugin_agent_nodeattestor_aws_iid.md)*
+
+The `aws_iid` plugin automatically attests instances using the AWS Instance
+Metadata API and the AWS Instance Identity document. It also allows an operator
+to use AWS Instance IDs when defining SPIFFE ID attestation policies. Agents
+attested by the aws_iid attestor will be issued a SPIFFE ID like
+`spiffe://example.org/spire/agent/aws_iid/ACCOUNT_ID/REGION/INSTANCE_ID`. Additionally,
+this plugin resolves the agent's AWS IID-based SPIFFE ID into a set of selectors.
+
+## Configuration
+
+| Configuration                        | Description                                                                                                                                                   | Default                                               |
+|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------|
+| `access_key_id`                      | AWS access key id                                                                                                                                             | Value of `AWS_ACCESS_KEY_ID` environment variable     |
+| `secret_access_key`                  | AWS secret access key                                                                                                                                         | Value of `AWS_SECRET_ACCESS_KEY` environment variable |
+| `skip_block_device`                  | Skip anti-tampering mechanism which checks to make sure that the underlying root volume has not been detached prior to attestation.                           | false                                                 |
+| `disable_instance_profile_selectors` | Disables retrieving the attesting instance profile information that is used in the selectors. Useful in cases where the server cannot reach iam.amazonaws.com | false                                                 |
+| `assume_role`                        | The role to assume                                                                                                                                            | Empty string, Optional parameter.                     |
+| `partition`                          | The AWS partition of the attested nodes, used to build the `assume_role` ARN &lt;aws&vert;aws-cn&vert;aws-us-gov&vert;aws-eusc&gt;                            | aws                                                   |
+| `web_identity_role_arn`              | IAM role to assume with `AssumeRoleWithWebIdentity` and `web_identity_token_file`. Cannot be combined with `access_key_id`; ignores the env access keys.      | Empty string, Optional parameter.                     |
+| `web_identity_token_file`            | Path to the web identity token file. Required with `web_identity_role_arn`.                                                                                   | Empty string, Optional parameter.                     |
+| `partitions`                         | Credentials for each AWS partition, to attest nodes from more than one partition [see below](#attesting-nodes-from-more-than-one-aws-partition)               |                                                       |
+| `verify_organization`                | Verify that nodes belong to a specified AWS Organization [see below](#enabling-aws-node-attestation-organization-validation)                                  |                                                       |
+| `validate_eks_cluster_membership`    | Verify that nodes belong to specified EKS clusters [see below](#enabling-aws-node-attestation-eks-cluster-validation)                                         |                                                       |
+
+Sample configuration:
+
+```hcl
+    NodeAttestor "aws_iid" {
+        plugin_data {
+            access_key_id = "ACCESS_KEY_ID"
+            secret_access_key = "SECRET_ACCESS_KEY"
+        }
+    }
+```
+
+If `assume_role` is set, the SPIRE server will assume the role as specified by the template `arn:{{Partition}}:iam::{{AccountID}}:role/{{AssumeRole}}` where `Partition` comes from the AWS NodeAttestor plugin configuration if specified otherwise set to 'aws', `AccountID` is taken from the AWS IID document sent by the SPIRE agent to the SPIRE server and `AssumeRole` comes from the AWS NodeAttestor plugin configuration. Details about the template engine are available in the [template engine documentation](template_engine.md).
+
+In the following configuration,
+
+```hcl
+    NodeAttestor "aws_iid" {
+        plugin_data {
+            assume_role = "spire-server-delegate"
+        }
+    }
+```
+
+assuming AWS IID document sent from the spire agent contains `accountId : 12345678`, the spire server will assume "arn:aws:iam::12345678:role/spire-server-delegate" role before making any AWS call for the node attestation. If `assume_role` is configured, the spire server will always assume the role even if the both the spire-server and the spire agent is deployed in the same account.
+
+## Attesting nodes from more than one AWS partition
+
+By default, all nodes are attested with the credentials and `partition` configured at the top level. To attest nodes from more than one AWS partition (e.g. commercial AWS and GovCloud), configure the credentials of each partition in a `partitions` block, keyed by partition name. The partition of a node is derived from the region in its instance identity document (`cn-` regions are in `aws-cn`, `us-gov-` regions in `aws-us-gov`, `eusc-` regions in `aws-eusc`, and all others in `aws`). Nodes from a partition without an entry are rejected before any AWS API call.
+
+Each entry accepts the following fields. `access_key_id`, `secret_access_key`, `assume_role`, `partition`, `web_identity_role_arn` and `web_identity_token_file` cannot be set at the top level together with `partitions`. The `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables are not copied into the entries as defaults. An entry without static credentials or a web identity role falls back to the AWS SDK default credential chain, which includes the environment, so those variables can still apply to it.
+
+| Field Name              | Description                                                                                                      | Constraints                                   |
+|-------------------------|------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
+| access_key_id           | AWS access key id for the partition                                                                              | optional, requires `secret_access_key`        |
+| secret_access_key       | AWS secret access key for the partition                                                                          | optional, requires `access_key_id`            |
+| web_identity_role_arn   | IAM role in the partition to assume with `AssumeRoleWithWebIdentity`                                             | optional, requires `web_identity_token_file`  |
+| web_identity_token_file | Path to the web identity token file                                                                              | optional, requires `web_identity_role_arn`    |
+| assume_role             | Role to assume in the node's account, as `arn:{{Partition}}:iam::{{AccountID}}:role/{{AssumeRole}}`              | optional                                      |
+
+Sample configuration:
+
+```hcl
+    NodeAttestor "aws_iid" {
+        plugin_data {
+            partitions = {
+                "aws" = {
+                    assume_role = "spire-server-delegate"
+                }
+                "aws-us-gov" = {
+                    web_identity_role_arn = "arn:aws-us-gov:iam::123456789012:role/spire-server"
+                    web_identity_token_file = "/var/run/secrets/spire-server/aws-us-gov-token"
+                    assume_role = "spire-server-delegate"
+                }
+            }
+        }
+    }
+```
+
+If `verify_organization` is enabled, the management account is accessed with the entry of the partition of `management_account_region`.
+
+## Enabling AWS Node Attestation Organization Validation
+
+For configuring AWS Node attestation method with organization validation following configuration can be used:
+
+| Field Name                | Description                                                                                   | Constraints                                  |
+|---------------------------|-----------------------------------------------------------------------------------------------|----------------------------------------------|
+| management_account_id     | Account id of the organization                                                                | required (unless `account_list_file` is set) |
+| management_account_region | Region of management account id                                                               | optional                                     |
+| assume_org_role           | IAM Role name, with capabilities to list accounts                                             | required (unless `account_list_file` is set) |
+| org_account_map_ttl       | Cache the list of accounts for particular time. Should be >= 1 minute. Defaults to 3 minutes. | optional                                     |
+| account_list_file         | Source the org account list from a file instead of the AWS Organizations API                  | optional                                     |
+
+Using the block `verify_organization` the org validation node attestation method will be enabled. With above configuration spire server will form and try to assume the role as: `arn:aws:iam::management_account_id:role/assume_org_role`. When not used, block ex. `verify_organization = {}` should not be empty, it should be completely removed as its optional or should have all required parameters namely `management_account_id`, `assume_org_role`.
+
+### Sourcing the account list from a file
+
+For large organizations, calling `organizations:ListAccounts` can be expensive: the API returns at most 20 accounts per page, the list is cached per `spire-server` process, and the cache TTL timer is per replica. With many replicas and a large org this multiplies load on the management account's shared `ListAccounts` throttle pool and can lead to `TooManyRequestsException` errors for SPIRE and other callers.
+
+To avoid this, set `account_list_file` to the path of a JSON file containing the organization's account IDs. When set, the plugin reads the account list from this file instead of calling AWS, and **no `organizations:ListAccounts` IAM permission is required**. `account_list_file` is mutually exclusive with `management_account_id` and `assume_org_role`.
+
+The file is read and validated at configuration time (the plugin fails to start if the file is missing or malformed). It is then re-read when the cached list is older than `org_account_map_ttl`; the refresh happens lazily on the next attestation after the TTL has elapsed (there is no background timer), so updates are picked up without restarting the server.
+
+The list is fail-closed: if the file is empty, unreadable, or malformed at runtime, accounts validated against it will fail attestation rather than be allowed. Keep the file current, and note that an empty list (`[]`) rejects every account.
+
+The file format is a JSON array of 12-digit AWS account IDs. The operator is responsible for populating it with only eligible (e.g. ACTIVE) accounts:
+
+```json
+["111111111111", "222222222222", "333333333333"]
+```
+
+Sample configuration:
+
+```hcl
+NodeAttestor "aws_iid" {
+    plugin_data {
+        verify_organization = {
+            account_list_file   = "/etc/spire/org-accounts.json"
+            org_account_map_ttl = "15m"
+        }
+    }
+}
+```
+
+A common deployment pattern is to run a single org-wide enumerator (for example, a Kubernetes CronJob that calls `ListAccounts` and writes the result to a ConfigMap mounted into the `spire-server` pods). This gives all replicas a shared account list sourced from one AWS caller, without SPIRE needing to know anything about the refresh mechanism. The same approach works with a sidecar, an init container, or a file on a VM.
+
+### AWS IAM Permissions for Organization Validation (API mode)
+
+When using the API-based configuration (with `management_account_id` and `assume_org_role`), the following IAM permissions are required.
+
+The role `assume_org_role` must be created in the management account (`management_account_id`) and should have a trust relationship with the role assumed by the SPIRE server. Below is a sample policy depicting the permissions required along with the trust relationship that needs to be created in the management account.
+
+Policy :
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": "organizations:ListAccounts",
+            "Effect": "Allow",
+            "Resource": "*",
+            "Sid": "SpireOrganizationListAccountRole"
+        }
+    ]
+}
+```
+
+Trust Relationship
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "CrossAccountAssumeRolePolicy",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [
+                    "arn:aws:iam::account-id-where-spire-is-running:role/spire-control-plane-root-server",
+                    "arn:aws:iam::account-id-where-spire-is-running:role/spire-control-plane-regional-server"
+                ]
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}
+```
+
+**Note:** No `organizations:ListAccounts` IAM permission is required when using `account_list_file` mode.
+
+## Enabling AWS Node Attestation EKS Cluster Validation
+
+For configuring AWS Node attestation method with EKS cluster validation following configuration can be used:
+
+| Field Name        | Description                                                   | Constraints |
+| ----------------- | ------------------------------------------------------------- | ----------- |
+| eks_cluster_names | List of EKS cluster names that nodes are allowed to belong to | required    |
+
+Using the block `validate_eks_cluster_membership` the EKS cluster validation node attestation method will be enabled. With above configuration SPIRE server will verify that the attesting node is part of one of the specified EKS clusters. When not used, block ex. `validate_eks_cluster_membership = {}` should not be empty, it should be completely removed as its optional or should have all required parameters namely `eks_cluster_names`.
+
+Sample configuration:
+
+```hcl
+NodeAttestor "aws_iid" {
+    plugin_data {
+        validate_eks_cluster_membership = {
+            eks_cluster_names = ["production-cluster", "staging-cluster"]
+        }
+    }
+}
+```
+
+The SPIRE server will validate that the attesting EC2 instance is part of an Auto Scaling Group that belongs to one of the specified EKS clusters. The validation process:
+
+1. Retrieves the list of node groups for each specified EKS cluster
+2. For each node group, gets the associated Auto Scaling Groups
+3. Checks if the attesting instance ID is present in any of these Auto Scaling Groups
+
+### AWS IAM Permissions for EKS Validation
+
+The user or role identified by the configured credentials must have additional permissions for EKS cluster validation:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "EKSClusterValidation",
+            "Effect": "Allow",
+            "Action": [
+                "eks:ListNodegroups",
+                "eks:DescribeNodegroup",
+                "autoscaling:DescribeAutoScalingGroups"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+## Disabling Instance Profile Selectors
+
+In cases where spire-server is running in a location with no public internet access available, setting `disable_instance_profile_selectors = true` will prevent the server from making requests to `iam.amazonaws.com`. This is needed as spire-server will fail to attest nodes as it cannot retrieve the metadata information.
+
+When this is enabled, `IAM Role` selector information will no longer be available for use.
+
+## AWS IAM Permissions
+
+The user or role identified by the configured credentials must have permissions for `ec2:DescribeInstances`.
+
+The following is an example for a IAM policy needed to get instance's info from AWS.
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeInstances",
+                "iam:GetInstanceProfile"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+**Note:** Additional permissions are required when using optional validation features:
+
+- For organization validation (`verify_organization`): `organizations:ListAccounts` (not required when `account_list_file` is configured)
+- For EKS cluster validation (`validate_eks_cluster_membership`): `eks:ListNodegroups`, `eks:DescribeNodegroup`, `autoscaling:DescribeAutoScalingGroups`
+
+For more information on security credentials, see <https://docs.aws.amazon.com/general/latest/gr/aws-security-credentials.html>.
+
+## Supported Selectors
+
+This plugin generates the following selectors related to the instance where the agent is running:
+
+| Selector            | Example                                               | Description                                                      |
+|---------------------|-------------------------------------------------------|------------------------------------------------------------------|
+| Account ID          | `aws_iid:account_id:123456789012`                     | The ID of the AWS account the instance belongs to.               |
+| Availability Zone   | `aws_iid:az:us-west-2b`                               | The Availability Zone in which the instance is running.          |
+| IAM role            | `aws_iid:iamrole:arn:aws:iam::123456789012:role/Blog` | An IAM role within the instance profile for the instance         |
+| Image ID            | `aws_iid:image:id:ami-5fb8c835`                       | The ID of the AMI used to launch the instance.                   |
+| Instance ID         | `aws_iid:instance:id:i-0b22a22eec53b9321`             | The ID of the instance.                                          |
+| Instance Tag        | `aws_iid:tag:name:blog`                               | The key (e.g. `name`) and value (e.g. `blog`) of an instance tag |
+| Region              | `aws_iid:region:us-west-2`                            | The Region in which the instance is running.                     |
+| Security Group ID   | `aws_iid:sg:id:sg-01234567`                           | The id of the security group the instance belongs to             |
+| Security Group Name | `aws_iid:sg:name:blog`                                | The name of the security group the instance belongs to           |
+
+All the selectors have the type `aws_iid`.
+
+The `IAM role` selector is included in the generated set of selectors only if the instance has an IAM Instance Profile associated and `disable_instance_profile_selectors = false`
+
+## Security Considerations
+
+The AWS Instance Identity Document, which this attestor leverages to prove node identity, is available to any process running on the node by default. As a result, it is possible for non-agent code running on a node to attest to the SPIRE Server, allowing it to obtain any workload identity that the node is authorized to run.
+
+While many operators choose to configure their systems to block access to the Instance Identity Document, the SPIRE project cannot guarantee this posture. To mitigate the associated risk, the `aws_iid` node attestor implements Trust On First Use (or TOFU) semantics. For any given node, attestation may occur only once. Subsequent attestation attempts will be rejected.
+
+It is still possible for non-agent code to complete node attestation before SPIRE Agent can, however this condition is easily and quickly detectable as SPIRE Agent will fail to start, and both SPIRE Agent and SPIRE Server will log the occurrence. Such cases should be investigated as possible security incidents.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "synced_at_utc": "2026-11-12T02:03:52Z",
+  "synced_at_utc": "2026-11-12T02:09:55Z",
   "scope": "text-svg",
   "project_count": 26,
   "totals": {
@@ -11,7 +11,7 @@
     "svg": 513,
     "media_other": 0,
     "total_files": 8759,
-    "total_bytes": 85207187
+    "total_bytes": 85207141
   },
   "projects": [
     {
@@ -700,7 +700,7 @@
             }
           ],
           "files": 480,
-          "bytes": 3350053
+          "bytes": 3350030
         },
         {
           "repo": "argoproj/argo-workflows",
@@ -736,7 +736,7 @@
             }
           ],
           "files": 157,
-          "bytes": 4757743
+          "bytes": 4757720
         }
       ],
       "stats": {
@@ -747,7 +747,7 @@
         "svg": 0,
         "media_other": 0,
         "total_files": 855,
-        "total_bytes": 10112619
+        "total_bytes": 10112573
       }
     },
     {

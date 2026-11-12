@@ -275,7 +275,27 @@ def copy_filtered_tree(
 
             out_file = dest_root / rel_dir / fname
             out_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src_to_read, out_file)
+            if ext in (DOC_EXTS | CODE_CONFIG_EXTS):
+                raw_bytes = src_to_read.read_bytes()
+                text_data = raw_bytes.decode("utf-8", errors="surrogateescape")
+                sanitized = re.sub(
+                    r"xox([baprs])-[0-9]{8,}-[0-9A-Za-z-]{10,}",
+                    r"xox\1-EXAMPLE-REDACTED-DOC-TOKEN",
+                    text_data,
+                )
+                sanitized = re.sub(
+                    r"\bgh([pousr])_[A-Za-z0-9]{36,}\b",
+                    r"gh\1_EXAMPLE_REDACTED_DOC_TOKEN",
+                    sanitized,
+                )
+                if sanitized != text_data:
+                    out_bytes = sanitized.encode("utf-8", errors="surrogateescape")
+                    out_file.write_bytes(out_bytes)
+                    size = len(out_bytes)
+                else:
+                    shutil.copyfile(src_to_read, out_file)
+            else:
+                shutil.copyfile(src_to_read, out_file)
 
             stats["total_files"] += 1
             stats["total_bytes"] += size

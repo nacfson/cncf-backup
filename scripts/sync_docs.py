@@ -288,6 +288,16 @@ def copy_filtered_tree(
                     r"gh\1_EXAMPLE_REDACTED_DOC_TOKEN",
                     sanitized,
                 )
+                sanitized = re.sub(
+                    r"\bhvs\.[A-Za-z0-9_-]{20,}\b",
+                    "hvs.EXAMPLE_REDACTED_VAULT_TOKEN",
+                    sanitized,
+                )
+                sanitized = re.sub(
+                    r"\bs\.(?=[A-Za-z0-9]{24}\b)(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])[A-Za-z0-9]{24}\b",
+                    "s.EXAMPLE_REDACTED_VAULT_TOKEN",
+                    sanitized,
+                )
                 if sanitized != text_data:
                     out_bytes = sanitized.encode("utf-8", errors="surrogateescape")
                     out_file.write_bytes(out_bytes)

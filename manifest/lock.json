@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "synced_at_utc": "2026-11-12T02:09:55Z",
+  "synced_at_utc": "2026-11-12T02:21:52Z",
   "scope": "text-svg",
   "project_count": 26,
   "totals": {
@@ -11,7 +11,7 @@
     "svg": 513,
     "media_other": 0,
     "total_files": 8759,
-    "total_bytes": 85207141
+    "total_bytes": 85207145
   },
   "projects": [
     {
@@ -1091,7 +1091,7 @@
             }
           ],
           "files": 98,
-          "bytes": 1194244
+          "bytes": 1194248
         }
       ],
       "stats": {
@@ -1102,7 +1102,7 @@
         "svg": 1,
         "media_other": 0,
         "total_files": 98,
-        "total_bytes": 1194244
+        "total_bytes": 1194248
       }
     },
     {

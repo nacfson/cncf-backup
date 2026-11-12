@@ -4,7 +4,7 @@ Consolidated, version-pinned documentation corpus covering **all 26 CNCF Graduat
 
 ## Corpus Summary
 
-- **Last synced (UTC):** `2026-11-12T02:09:55Z`
+- **Last synced (UTC):** `2026-11-12T02:21:52Z`
 - **Backup scope:** `text-svg` (prose docs + config/code examples + vector `.svg` architecture diagrams; latest stable version per project)
 - **Total projects:** `26` (synced from `31` upstream GitHub repositories)
 - **Total files:** `8,759` (`6,453` Markdown/MDX, `831` reStructuredText, `882` YAML/JSON/code examples, `513` SVG diagrams)

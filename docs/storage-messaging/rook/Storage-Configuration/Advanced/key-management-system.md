@@ -189,7 +189,7 @@ $ vault policy write rook /tmp/rook.hcl
 $ vault token create -policy=rook
 Key                  Value
 ---                  -----
-token                s.FYzlo02cgnTehF8dXnAoq2Z9
+token                s.EXAMPLE_REDACTED_VAULT_TOKEN
 token_accessor       oMo7sAXQKbYtxU4HtO8k3pko
 token_duration       768h
 token_renewable      true

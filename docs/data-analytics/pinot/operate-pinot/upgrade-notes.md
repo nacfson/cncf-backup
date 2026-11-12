@@ -1,0 +1,897 @@
+---
+description: >-
+  Operator-facing behavior changes, migration hazards, and required actions
+  for recent Apache Pinot releases.
+---
+
+# Upgrade notes
+
+This page summarizes the behavior changes, new defaults, deprecations, and
+migration hazards that operators should review before upgrading Apache Pinot.
+For the full list of features and fixes in each release, see the
+[release notes](../reference/releases/README.md).
+
+For guidance on running the cross-release compatibility tester and the
+recommended component upgrade order, see
+[Upgrading Pinot](upgrading-pinot-cluster.md).
+
+## Upcoming Release
+
+### Deprecated table properties marked for future removal
+
+Table-config getters now record the release in which each property was deprecated and are marked `forRemoval = true`. This annotation change does not remove the JSON properties or change runtime behavior, and does not specify a removal release. Audit saved configs and generators against these replacements; do not interpret the historical deprecation version as a new removal deadline.
+
+| Deprecated property | Deprecated since | Migration |
+| --- | --- | --- |
+| `fieldConfigList[].indexType` | 0.9.0 | Use `fieldConfigList[].indexTypes`. |
+| `tableIndexConfig.jsonIndexColumns` | 0.12.0 | Use `tableIndexConfig.jsonIndexConfigs`. |
+| `tableIndexConfig.streamConfigs` | 0.7.1 | Use `ingestionConfig.streamIngestionConfig.streamConfigMaps`. |
+| `tableIndexConfig.createInvertedIndexDuringSegmentGeneration` | 1.6.0 | Remove; ignored. |
+| `routing.routingTableBuilderName` | 0.3.0 | Use `routing.segmentPrunerTypes` and `routing.instanceSelectorType`. |
+| `segmentsConfig.segmentPushFrequency` | 0.8.0 | Use `ingestionConfig.batchIngestionConfig.segmentIngestionFrequency`. |
+| `segmentsConfig.segmentPushType` | 0.8.0 | Use `ingestionConfig.batchIngestionConfig.segmentIngestionType`. |
+| `segmentsConfig.replicasPerPartition` | 1.1.0 | Use `segmentsConfig.replication`. |
+| `segmentsConfig.replicaGroupStrategyConfig`, `segmentsConfig.minimizeDataMovement` | 1.3.0 | Migrate to `instanceAssignmentConfigMap` rather than copying the old fields verbatim. |
+| `instanceAssignmentConfigMap.<type>.replicaGroupPartitionConfig.minimizeDataMovement` | 1.1.0 | Remove this deprecated field. |
+| `upsertConfig.enableSnapshot` | 1.4.0 | Use `upsertConfig.snapshot`. |
+| `upsertConfig.enablePreload` | 1.4.0 | Use `upsertConfig.preload`. |
+| `dedupConfig.enablePreload` | 1.4.0 | Use `dedupConfig.preload`. |
+| `upsertConfig.allowPartialUpsertConsumptionDuringCommit`, `dedupConfig.allowDedupConsumptionDuringCommit` | 1.4.0 | Use `ingestionConfig.streamIngestionConfig.parallelSegmentConsumptionPolicy`. |
+
+*Source: [PR #18411](https://github.com/apache/pinot/pull/18411)*
+
+### Lucene index recovery on rollback
+
+Normal segment preprocessing now automatically rebuilds unreadable newer-format Lucene indexes from retained original forward-index values using the running version's writer and table configuration. This covers single-column text, multi-column text, and directory or packed HNSW indexes; compatible indexes are reused. No recovery flag is required, but existing preprocessing opt-outs still apply.
+
+Install a Pinot release containing this recovery support on the intended rollback target **before** upgrading Lucene. Retain the original forward indexes: reconstructing multi-value values from dictionary/inverted indexes can lose ordering and duplicates. If the required original values are unavailable, recovery fails before replacing the incompatible index; restore a compatible segment or refresh it from retained source data.
+
+Allow extra CPU, I/O, and segment-loading time for rebuilds after downgrade. Interrupted builds restart from retained values on a later load; successfully recovered indexes are reused on subsequent loads. Corruption and ordinary I/O errors fail loading rather than triggering format recovery. This is not a general guarantee that every segment format or custom Lucene codec can be downgraded.
+
+*Source: [PR #19900](https://github.com/apache/pinot/pull/19900)*
+
+### Upsert metadataTTL restart and missed snapshots
+
+For upsert tables with `metadataTTL`, Pinot now caps the persisted TTL watermark when an older segment misses its valid-document snapshot, so a restart re-resolves its primary keys rather than trusting a stale snapshot and exposing superseded rows. The in-memory expiry watermark is unchanged. No configuration, wire, or on-disk format changes are required; tables without `metadataTTL` are unaffected.
+
+**Check the first restart during upgrade.** Watermarks written by an older server are trusted as-is, so the upgrading restart can still expose duplicate rows once if the last snapshot pass missed a segment. Reloading the affected segments resolves their keys; subsequent persisted watermarks use the corrected capping behavior. The fix does not depend on graceful shutdown.
+
+If segments repeatedly miss snapshots, the persisted watermark can lag. After restart, more segments take the normal key-resolution path, temporarily loading more primary keys until expiry runs. Watch for `Capped TTL watermark to persist from: ... to: ...` warnings when diagnosing restart memory or snapshot contention.
+
+*Source: [PR #19832](https://github.com/apache/pinot/pull/19832)*
+
+### Server compilation failures return errors promptly
+
+When a server successfully deserializes a request but cannot compile its query, it now returns `QUERY_EXECUTION` with the underlying error instead of leaving the broker to time out with a servers-not-responded error. These failures count in `QUERY_EXECUTION_EXCEPTIONS`, not `REQUEST_DESERIALIZATION_EXCEPTIONS`; update alerts that relied on the old classification. The latter meter now counts only Thrift deserialization failures.
+
+The single-stage broker also rejects unexecutable EXPR_MIN/EXPR_MAX calls with `QUERY_VALIDATION` before dispatch. Check the [required rewriters and placement restrictions](../functions/aggregation/arg_min-arg_max.md); enabling the rewriters does not make aliases, nested calls, or use outside the SELECT list supported.
+
+*Source: [PR #19883](https://github.com/apache/pinot/pull/19883)*
+
+### Netty 4.2 and ZooKeeper TLS bootstrap compatibility
+
+Pinot upgrades Netty to 4.2.19.Final. Before upgrading deployments with ZooKeeper TLS, verify the process-wide TLS bootstrap properties supplied to Pinot services, tools, and Java clients. Supply these settings before client creation or initialization of client-owning classes; they cannot be loaded from the cluster being connected to.
+
+When `zookeeper.ssl.hostnameVerification=false` is explicitly configured and no custom SSL-context supplier is set, Pinot installs a ZooKeeper JDK SSL-context supplier and selects the JDK provider. It converts recognized OpenSSL cipher aliases to JSSE cipher names. Enabled hostname verification and existing custom suppliers keep their existing construction paths and provider ownership. The Pinot supplier uses process-wide ZooKeeper trust/key stores, protocol, revocation, and FIPS settings; arbitrary per-client TLS overrides are outside this hook. Validate secure connections and configured cipher suites in your environment. Do not disable hostname verification as an upgrade workaround.
+
+Pinot's Arrow allocator integration is also updated for Netty 4.2 while preserving shared direct-memory limits. Custom integrations using Netty or Arrow internals should rebuild and validate against the upgraded dependencies rather than assuming binary compatibility.
+
+*Source: [PR #19828](https://github.com/apache/pinot/pull/19828)*
+
+### Native t-digest implementation replaces the tdunning dependency
+
+Pinot removes `com.tdunning:t-digest` while retaining legacy verbose/compact digest BYTES and object serialization type 10. Byte compatibility does **not** guarantee identical percentile results or downgrade safety. Before upgrading, compare representative percentile queries, especially duplicate-value plateaus, fractional weights, infinities, and SmartTDigest multi-valued inputs with null handling. SmartTDigest MV now includes each non-null row once. Empty SmartTDigest returns NULL with null handling and -Infinity otherwise; ordinary TDigest still returns NaN without null handling.
+
+**Custom plugins must migrate and recompile.** Replace tdunning types with `org.apache.pinot.segment.local.customobject.tdigest.TDigest`. Replace `CustomSerDeUtils.TDIGEST_SER_DE` with `fromBytes(bytes)`/`serialize()` for stored digests. Use `TDigestAccumulator.forLegacyAggregation(compression)` for general or star-tree aggregation and `forReduction(compression)` for SQL reducers. Native factories normalize finite compression below 10 to 10; standard SQL still rejects negative compression literals, and NaN/infinite compression is invalid.
+
+**Review historical digests before merging, rebuilding, or downgrading.** Numerically corrupt distributions can remain readable with NaN statistics, but merging them with nonempty input fails queries, rollup, or star-tree builds. `IS NULL` and JDBC null mapping cannot detect this corruption. Errors beginning `Cannot merge or mutate a historically corrupted TDigest` require rebuilding from original measurements or reingesting known-good data; retrying the same bytes does not repair them. Old servers can also produce corrupt intermediates during rolling upgrades when centroid arithmetic overflows, so finish upgrading the producing servers. Historical weighted boundaries that cannot be repaired while preserving mass and first moment likewise fail mutation or nonempty merges. Retained corrupt, unrepairable, or fractional payloads may exceed old readers' capacity; rebuild affected digests before downgrading or exposing them to old readers.
+
+See the [t-digest migration guide](https://github.com/apache/pinot/blob/master/compatibility-verifier/README.md#t-digest-migration) for API replacements, interpolation differences, fractional-boundary limits, and diagnostics.
+
+*Source: [PR #19795](https://github.com/apache/pinot/pull/19795)*
+
+### Query-quota rejections use their own error code and metric
+
+Broker query-quota rejections now decode as `TOO_MANY_REQUESTS` (429) instead of `WORKLOAD_BUDGET_EXCEEDED`, which now has error code 430. Quota rejections therefore count under `QUERY_ERROR_TOO_MANY_REQUESTS` (`queryErrorTooManyRequests`) rather than `QUERY_ERROR_WORKLOAD_BUDGET_EXCEEDED` (`queryErrorWorkloadBudgetExceeded`). Update dashboards and alerts that relied on the old metric. Both codes map to HTTP 429 when HTTP-status-for-errors is enabled.
+
+*Source: [PR #19676](https://github.com/apache/pinot/pull/19676)*
+
+### Multi-stage query failures retain their error code during mailbox cancellation
+
+When a multi-stage query's sending mailbox is cancelled because of a worker error, Pinot now passes the worker's query error code and message to the receiver instead of reporting a generic query-cancellation error (503). For example, a server CPU-limit failure can now report `SERVER_RESOURCE_LIMIT_EXCEEDED` (245). Ordinary cancellations still report 503. If alerts or clients classify query failures by error code, expect the more specific codes after upgrading.
+
+*Source: [PR #19682](https://github.com/apache/pinot/pull/19682)*
+
+### Docker broker query logging resumes
+
+The Docker broker's Log4j2 configuration now connects `QueryLogger` to its `querylog` appender. A case mismatch previously suppressed query records in the Docker image. After upgrading, expect these records to resume in the broker query log; check downstream log ingestion and alert volume if they depend on query records.
+
+*Source: [PR #19626](https://github.com/apache/pinot/pull/19626)*
+
+### Table metadata requests no longer alter serving segment schemas
+
+Before this fix, `GET /tables/{table}/metadata?columns=*` could remove columns from a serving segment's in-memory schema when that server held segments with different column sets, as after schema evolution. Queries such as `SELECT *` could then omit the affected columns until the segment was reloaded. The controller's corresponding endpoint could trigger the same behavior because it forwarded `columns=*` to the server. The metadata request now computes the common column set without changing segment schemas.
+
+**Action required.** If a cluster running an older version served `columns=*` metadata requests and newly added columns appear missing from queries, reload affected segments after upgrading to restore their in-memory schemas.
+
+*Source: [PR #19665](https://github.com/apache/pinot/pull/19665)*
+
+### Segments metadata API no longer falls back to the legacy per-segment endpoint
+
+The controller previously fell back to the per-segment server endpoint whenever a table-level `GET /segments/{tableName}/metadata` request failed. That fallback existed only for servers older than 1.5.0, the first release with the table-level server endpoint. A failed request now returns an error instead of falling back.
+
+**Action required.** `GET /segments/{tableName}/metadata` returns an error while any server hosting the table is older than 1.5.0, so the API is unavailable until those servers are upgraded. When upgrading from a release older than 1.5.0, upgrade to 1.5.x or 1.6.x first.
+
+*Source: [PR #20222](https://github.com/apache/pinot/pull/20222)*
+
+### Index plugin registry supports at most 64 index types
+
+Pinot now limits the combined index types registered by built-in and custom `IndexPlugin` implementations to 64. A server with more than 64 registered types fails startup before joining the cluster, rather than failing during segment loads. The segment format is unchanged.
+
+**Action required for custom index plugin authors.** Count all distinct index types registered by your plugin set before upgrading; keep the total at or below 64. Deployments using only Pinot's built-in index types are below the limit.
+
+*Source: [PR #19475](https://github.com/apache/pinot/pull/19475)*
+
+### Schema overrides through POST refresh server schema caches
+
+When `POST /schemas` overrides an existing schema (the default `override=true` behavior), Pinot now sends a schema refresh message to servers hosting tables that use it, as `PUT /schemas/{schemaName}` already does. This lets subsequent segment loads use the updated schema without an explicit segment reload. The refresh notification is best effort; if a server has not received it, verify its schema cache before relying on newly loaded segments to use the changed fields.
+
+*Source: [PR #19677](https://github.com/apache/pinot/pull/19677)*
+
+### Cluster-configured MSE disabled rules now apply individually
+
+When `pinot.broker.mse.planner.disabled.rules` is set through cluster config with multiple comma-separated rule names, brokers now disable each listed rule. Previously, the entire value was read as one rule name, so none of the listed rules matched; the value still replaced Pinot's built-in disabled-rule set, allowing those rules to run. Broker config-file values already split correctly. Unset and empty values retain their existing behavior.
+
+**Action required.** If you set multiple disabled rules through cluster config, compare representative multi-stage query plans before and after upgrading. The listed rules will now be disabled, which can change plans. See [Default Disabled Rules](../build-with-pinot/querying-and-sql/default-disabled-rules.md) for how this setting replaces the built-in set.
+
+*Source: [PR #19642](https://github.com/apache/pinot/pull/19642)*
+
+### Comma-separated cluster list settings now apply every entry
+
+When supplied through cluster config, `pinot.broker.allowedTablesForEmittingMetrics`, `pinot.server.allowedTablesForEmittingMetrics`, `pinot.server.transforms`, and `controller.access.protocols` now split comma-separated values into individual entries. Empty entries are ignored. Previously, a value with multiple entries could prevent table-level metrics, fail server startup for transforms, or cause the controller to use `controller.port` instead of the configured VIP protocol port. File-based settings were not affected.
+
+The `usePlannerRules` and `skipPlannerRules` query options now trim spaces around comma-separated rule names and ignore empty entries. Queries with spaces after commas may therefore use additional rules and produce a different plan.
+
+**Action required.** Review multi-entry values for these cluster settings before upgrading. Expect listed tables to begin emitting metrics and verify the controller VIP URL and port. Recheck query plans if planner-rule options contain spaces after commas.
+
+*Source: [PR #19644](https://github.com/apache/pinot/pull/19644)*
+
+### Optimized group-by holder sizing no longer corrupts sparse keys
+
+Single-stage queries with `optimizeMaxInitialResultHolderCapacity=true` now use the full dictionary-cardinality product when selecting their group-key holder. Equality and `IN` predicates on single-value grouping columns still reduce the dense result-holder capacity, but sparse dictionary IDs can no longer index past that reduced capacity or force overflowing raw keys into an undersized numeric holder.
+
+Predicates on multi-value grouping columns no longer reduce the estimated group count because every value in a matching row contributes a group. Previously, affected queries could throw `ArrayIndexOutOfBoundsException` or silently merge distinct groups through integer or long key collisions. The option remains disabled by default, and behavior with it disabled is unchanged.
+
+**Action required.** If you enabled this option, re-run representative dictionary-encoded group-by queries, especially queries with selective `IN`/equality filters, high-cardinality combinations, duplicate grouping expressions, or multi-value grouping columns. Corrected results can differ from results produced before the upgrade.
+
+*Source: [PR #19379](https://github.com/apache/pinot/pull/19379)*
+
+### Group-by queries now preserve null groups across encodings
+
+With [advanced null handling](../build-with-pinot/querying-and-sql/null-value-support.md#advanced-null-handling-support) enabled, single-stage `GROUP BY` queries now produce a distinct SQL `NULL` group for nullable dictionary-encoded columns and for null rows on multi-value group-key paths. This applies to single- and multi-column grouping across dictionary and raw encodings. Because Pinot ingests an empty multi-value array as null, an empty array also contributes to the `NULL` group.
+
+Previously, some paths grouped null rows under the column's configured default null value. Dictionary-encoded group-by columns were also forced onto a slower raw-value path. In addition, after a query reached its group limit, rows belonging to existing groups could be attributed to the first group or dropped. The corrected path preserves those existing groups. Queries without advanced null handling retain their previous behavior.
+
+**Action required.** Review dashboards and clients that group nullable columns with `enableNullHandling=true`. Results can now contain a `NULL` key instead of the configured default value, and counts can change when a query reaches its group limit.
+
+*Source: [PR #19390](https://github.com/apache/pinot/pull/19390)*
+
+### Streaming mailbox send stats no longer under-report the final block
+
+In multi-stage queries using streaming stats transport, a `MAILBOX_SEND` operator now accounts its in-progress end-of-stream call before serializing the stage-stats snapshot. Previously, its parent snapshot could omit the final call while already including completed child work. This produced missing or understated `executionTimeMs`, `memoryUsedBytes`, and `gcTimeMs`, especially for stages that emitted no data block, and could make derived self metrics negative.
+
+Operator execution totals and the broker-reported non-streaming stats path are unchanged. The serialized mailbox snapshot still excludes the small amount of work performed after collection to serialize the stats and hand the end-of-stream block to the exchange.
+
+**Action required.** Dashboards and alerts should stop treating negative `selfExecutionTimeMs`, `selfClockTimeMs`, `selfAllocatedMB`, or `selfGcTimeMs` as expected artifacts of streaming stats. Values collected before the upgrade can retain the old under-reporting.
+
+*Source: [PR #19365](https://github.com/apache/pinot/pull/19365)*
+
+### BYTES array literals require upgraded servers
+
+Both query engines now support `BYTES_ARRAY` literals built from SQL binary values, for example `ARRAY[X'00', X'0102', X'FF']`. They can be projected directly, nested in expressions, or compared with ingested multi-value `BYTES` columns. Query responses encode values as hexadecimal strings and report `BYTES_ARRAY` in result metadata.
+
+The single-stage Thrift `Literal` union adds append-only field 17, `list<binary> bytesArrayValue`. New readers remain compatible with existing literal fields, but old servers do not implement BYTES-array execution. A new broker sending this literal to an old server therefore does not provide usable mixed-version behavior.
+
+**Action required.** Upgrade servers before enabling queries that use BYTES array literals. During a rolling upgrade, do not send these queries to old servers. Review clients that inspect result metadata so they accept `BYTES_ARRAY` and hexadecimal response values.
+
+*Source: [PR #19247](https://github.com/apache/pinot/pull/19247)*
+
+### Segment uploads now bind authorization to the final destination table
+
+The v1 `POST /segments` endpoint now requires a consistent destination table across the `tableName` request parameter, optional `Pinot-TableName` header, and embedded `segment.table.name` metadata. Missing, blank, invalid, or conflicting values return HTTP 400. Pinot authorizes the canonical destination before fetching a segment source or mutating deep storage or ZooKeeper.
+
+Intentional promotion or reuse of an existing segment artifact whose embedded source-table metadata differs from its destination must use `POST /v2/segments`. The v2 endpoint preserves destination override behavior while binding authorization and database headers to the final destination. Pinot's Purge and Refresh minion tasks now use v2 because they can reuse existing artifacts; conversion tasks that regenerate destination-bound metadata remain on v1.
+
+**Action required.** Audit custom segment-upload clients. For v1 uploads, send an explicit destination and ensure every supplied table identifier matches. Move workflows that intentionally override embedded table metadata to `/v2/segments`, and grant the caller permission on the destination table rather than relying on cluster-level create access or a source-table identity.
+
+*Source: [PR #19231](https://github.com/apache/pinot/pull/19231)*
+
+### EXPR_MIN, EXPR_MAX, and time-series aggregation now honor null handling
+
+With query option `enableNullHandling=true`, `EXPR_MIN` and `EXPR_MAX` now skip a row when any measuring column is `NULL`. A null projection column remains valid payload and does not disqualify the row. Previously, a null measuring value was read as the column's default value and could incorrectly win the minimum or maximum comparison.
+
+The same functions also correct a pre-existing single-stage bug for queries that match more than one processing block in a segment. Measuring and projection values are now read from the current block, and a later winning row replaces stale projection values instead of appending to them. Corrected results apply regardless of the null-handling option.
+
+`TIMESERIESAGGREGATE` now skips rows whose value or timestamp is null when null handling is enabled. This function is used by time-series plan nodes rather than SQL, and receives the time-series query options through the query context.
+
+**Action required.** Review consumers that rely on `EXPR_MIN`, `EXPR_MAX`, or time-series aggregation over nullable inputs. Corrected queries can select a different row or return no aggregate where the old behavior incorporated column defaults. Also review `EXPR_MIN` and `EXPR_MAX` queries matching more than 10,000 documents per segment, because their result rows can change even when null handling is disabled.
+
+*Source: [PR #19357](https://github.com/apache/pinot/pull/19357)*
+
+### Keep brokers at least as new as servers during rolling upgrades
+
+Servers can now preserve null aggregate and group-by results in the single-stage engine's DataTable response even when query null handling is disabled. This fixes failures or corrupted neighboring values for queries whose aggregate result is null, such as `MAX(stringColumn)` over an empty result set.
+
+The additional null bitmap is backward-compatible when read by a new broker, but an older broker ignores it and can interpret the type-specific placeholder as a real value. This affects only the mixed-version window in which a server runs the new code while its broker is still on an older version.
+
+**Action required.** Follow the standard component order: upgrade brokers before servers, and roll back servers before brokers. Keep the broker version greater than or equal to the server version throughout the rollout and rollback.
+
+*Source: [PR #19201](https://github.com/apache/pinot/pull/19201)*
+
+### Multi-value aggregations now honor null semantics
+
+The following multi-value aggregation families now skip null rows when null handling is enabled: `DISTINCT_COUNT_MV`, `DISTINCT_SUM_MV`, `DISTINCT_AVG_MV`, `PERCENTILE_MV`, `PERCENTILE_EST_MV`, `PERCENTILE_KLL_MV`, and `PERCENTILE_TDIGEST_MV`, including their raw variants. Previously, these functions ignored the enabled null-handling mode and folded in the column's default value.
+
+Results can therefore change for null or empty inputs. For example, `DISTINCT_SUM_MV` over all-null input now returns `NULL` instead of `0`, while `PERCENTILE_MV` can return `NULL` instead of `-Infinity`.
+
+In the single-stage engine, this behavior change applies to queries with `enableNullHandling=true`; queries with the option disabled retain the previous behavior. The multi-stage engine always constructs aggregation functions with null handling enabled, so its corrected results apply regardless of the query option.
+
+**Action required.** Review dashboards, alerts, and client code that depend on sentinel values such as `0`, `NaN`, or `-Infinity` from these multi-value functions. Update them to accept SQL `NULL` for all-null or empty inputs.
+
+*Source: [PR #19158](https://github.com/apache/pinot/pull/19158)*
+
+### Real-time segments receive a post-commit replica grace period
+
+`SegmentStatusChecker` now applies the existing
+`controller.statuschecker.waitForPushTimePeriod` grace window from the segment
+metadata znode's latest modification time. This covers the moment a real-time
+or pauseless `COMMITTING` segment starts loading its immutable replicas.
+
+Previously, committed real-time segments had no push timestamp, so the checker
+could count them immediately while replicas were still loading. A single
+transiently under-replicated segment could lower the table-wide
+`percentOfReplicas` gauge and trigger a false
+`SegmentReplicasCriticallyLowForHATable` alert.
+
+The grace period only suppresses expected post-commit loading. When the window
+expires, a segment that is still under-replicated is checked and alerted as
+before, so stuck commits and genuine replica loss remain visible.
+
+**Action required.** No configuration migration is needed. Operators with
+alerting on `percentOfReplicas` or
+`SegmentReplicasCriticallyLowForHATable` should expect fewer transient alerts
+for high-ingest real-time and pauseless tables. Keep the existing grace-window
+setting long enough to cover normal immutable-segment build and load time.
+
+*Source: [PR #19094](https://github.com/apache/pinot/pull/19094)*
+
+### Custom dedup metadata manager contract changed
+
+Custom classes configured through `dedupConfig.metadataManagerClass` must now
+implement
+`checkRecordPresentOrUpdate(DedupRecordInfo, IndexSegment)` directly. Pinot has
+removed the deprecated overload that accepted `PrimaryKey`; the surviving
+`DedupRecordInfo` method is abstract instead of a default bridge.
+
+An older custom metadata-manager jar that only implements the removed overload
+can fail with `AbstractMethodError` during ingestion.
+
+**Action required for dedup extension authors.** Implement the
+`DedupRecordInfo` overload, rebuild the extension against the new Pinot
+artifacts, and test ingestion before upgrading servers.
+
+This release also removes deprecated methods from `FunctionRegistry`,
+`SegmentGeneratorConfig`, `RealtimeSegmentConfig.Builder`, `Schema`,
+`QueryContext.Builder`, `ControllerRequestURLBuilder`,
+`SegmentAssignmentUtils`, and `BrokerSelectorUtils`, plus the unused
+`ScalarFunction.isPlaceholder` attribute. Old binaries that call removed
+methods can fail with `NoSuchMethodError`; recompile out-of-tree Pinot SPI,
+segment SPI, and Java client integrations.
+
+No configuration keys, wire formats, or ZooKeeper-serialized fields change as
+part of these removals.
+
+*Source: [PR #19143](https://github.com/apache/pinot/pull/19143)*
+
+### Singular live-brokers endpoint removed
+
+The controller endpoint `GET /tables/{tableName}/livebrokers` has been
+removed. Use `GET /tables/livebrokers` instead.
+
+The replacement is not a path-only migration: the removed endpoint returned a
+`List<String>` for one table, while the plural endpoint returns a
+`Map<String, List<InstanceInfo>>` for the tables it resolves. External clients
+that continue to call the singular endpoint receive `404` after upgrading.
+
+**Action required.** Update controller API clients, scripts, and monitoring
+integrations to call the plural endpoint. Select the requested table from the
+response map and update deserialization logic to consume `InstanceInfo`
+objects rather than broker-name strings.
+
+The same change removes two deprecated `RequestUtils` methods used only by
+out-of-tree Java callers. Recompile and migrate custom code that calls
+`getFunctionExpression(String)` or `getOptionsFromJson(JsonNode, String)`.
+
+*Source: [PR #19142](https://github.com/apache/pinot/pull/19142)*
+
+### Legacy valid-doc-ID REST endpoints removed
+
+Pinot servers no longer expose these deprecated endpoints:
+
+| Removed endpoint | Replacement |
+| --- | --- |
+| `GET /segments/{table}/{segment}/validDocIds` | `GET /segments/{table}/{segment}/validDocIdsBitmap` |
+| `GET /tables/{table}/validDocIdMetadata` | `POST /tables/{table}/validDocIdsMetadata` |
+
+External operator scripts and third-party upsert or compaction tooling that
+still call the removed paths receive `404` after upgrading. The replacement
+table-level endpoint also changes the HTTP method from `GET` to `POST`.
+
+**Action required.** Search automation and integrations for the two legacy
+paths, migrate them to the replacements above, and verify request bodies and
+response handling before upgrading servers.
+
+This release also removes deprecated Java APIs including `SegmentName`,
+`TableConfigBuilder.setLLC`, replication-number accessors on
+`SegmentsValidationAndRetentionConfig`, and several controller/minion helpers.
+Recompile out-of-tree code that depends on those APIs.
+
+*Source: [PR #19141](https://github.com/apache/pinot/pull/19141)*
+
+### SegmentAdminClient segment selection now honors all filters
+
+`SegmentAdminClient.selectSegments` now uses
+`GET /segments/{tableName}` instead of the deprecated
+`GET /segments/{tableName}/select` endpoint. The deprecated endpoint remains
+available so controllers can continue serving clients from an earlier release
+during a rolling upgrade.
+
+Two previously ignored inputs now affect results:
+
+- Passing `excludeReplacedSegments=false` includes replaced segments. The old
+  endpoint always excluded them, so callers that pass `false` can receive a
+  larger result set after upgrading.
+- The `database` header is now honored when selecting segments.
+
+**Action required for Java client users.** Review code that calls
+`selectSegments` with `excludeReplacedSegments=false`, and ensure it can handle
+replaced segments in the returned list. Verify database-scoped clients pass the
+intended database header.
+
+This change also removes deprecated Java APIs for custom controller and index
+extensions, including two `PinotHelixResourceManager` methods and the
+four-argument `OnHeapGuavaBloomFilterCreator` constructor. Recompile any
+out-of-tree code that calls those APIs.
+
+*Source: [PR #19140](https://github.com/apache/pinot/pull/19140)*
+
+### Pre-1.0 deprecated Java and plugin APIs removed
+
+Pinot has removed a group of public APIs deprecated between 2016 and 2022. This
+is primarily a compatibility change for custom plugins and out-of-tree Java
+code; it does not change configuration keys, wire formats, or data stored in
+ZooKeeper.
+
+The removed APIs include legacy `Schema`, `GenericRow`, `FieldConfig`,
+`ConnectionFactory`, `FileUploadDownloadClient`, component-starter, segment
+pruner, and minion task-factory entry points. In particular, stale plugin jars
+that call `GenericRow.putField`, `Schema.addField(String, FieldSpec)`, or the
+five-argument `FieldConfig` constructor can fail at runtime with
+`NoSuchMethodError`.
+
+**Action required for plugin and client authors.** Rebuild custom record
+readers, record extractors, record transformers, minion tasks, and other
+out-of-tree Pinot integrations against the new Pinot artifacts before
+upgrading servers or minions. Migrate to the non-deprecated replacements,
+including `GenericRow.putValue` / `putValues`, `Schema.addField(FieldSpec)`, the
+`FieldConfig` list constructor or builder, URL-string `ConnectionFactory`
+methods, and the two-argument `PinotTaskExecutorFactory.init` method.
+
+The Pinot controller now calls the plural `GET /tables/{table}/size` server
+endpoint. The deprecated singular endpoint remains available for rolling
+upgrade compatibility.
+
+*Source: [PR #19139](https://github.com/apache/pinot/pull/19139)*
+
+### REST schema APIs now reject deprecated `TimeFieldSpec`
+
+Apache Pinot now formally deprecates `TimeFieldSpec` and rejects schema payloads
+that use `fieldType=TIME` on the controller REST validation paths:
+
+- `POST /schemas`
+- `PUT /schemas/{schemaName}`
+- `/schemas/validate`
+
+Use `DateTimeFieldSpec` through `dateTimeFieldSpecs` for all new or updated
+schemas submitted through the controller. Pinot still allows older schemas that
+already exist in cluster metadata to load internally for backward compatibility,
+so the change affects submission and validation, not startup of existing legacy
+tables.
+
+**Action required.** Audit any schema-generation tooling, CI validation, or
+operator runbooks that still emit `TimeFieldSpec`, and migrate them to
+`DateTimeFieldSpec` before upgrading. If you maintain a record reader or other
+schema-aware plugin, treat `DateTimeFieldSpec` as the default contract and keep
+legacy `TimeFieldSpec` handling only where backward compatibility requires it.
+
+*Source: [PR #18502](https://github.com/apache/pinot/pull/18502)*
+
+### Removal of deprecated PinotTaskManager scheduleTasks wrapper methods
+
+The following `@Deprecated(forRemoval = true)` wrapper methods in `PinotTaskManager` have been removed. These methods were deprecated since v1.4.0 (Feb 2025):
+
+- `scheduleAllTasksForAllTables(String)`
+- `scheduleAllTasksForDatabase(String, String)`
+- `scheduleAllTasksForTable(String, String)`
+- `scheduleTaskForAllTables(String, String)`
+- `scheduleTaskForDatabase(String, String, String)`
+- `scheduleTaskForTable(String, String, String)`
+- `protected scheduleTasks(List<String>, boolean, String)`
+- `protected scheduleTask(String, List<String>, String)`
+
+**Action required for plugin authors and custom controllers.** If your custom code or minion plugins call any of these methods, migrate to `scheduleTasks(TaskSchedulingContext)` instead. This is a programmatic API change affecting only direct callers of `PinotTaskManager` methods; the REST API endpoints for task scheduling remain unchanged.
+
+*Source: [PR #18275](https://github.com/apache/pinot/pull/18275)*
+
+### Segment SPI upgrade for custom segment and index extensions
+
+Apache Pinot 1.6.0 changes several `@InterfaceAudience.Private` types in
+`pinot-segment-spi`. This is a developer-facing compatibility change for
+custom code that implements Pinot's segment-level interfaces. It does not
+change query syntax, table configuration, or normal segment readability for
+clusters that only use built-in Pinot components.
+
+The breaking changes in [PR #18280](https://github.com/apache/pinot/pull/18280)
+include:
+
+- `ColumnMetadata` now requires explicit implementations for
+  `isMinMaxValueInvalid()`, `getLengthOfShortestElement()`,
+  `getLengthOfLongestElement()`, `isAscii()`, `getNumIndexes()`,
+  `getIndexType()`, `getIndexSize()`, and `getIndexSizeFor()`.
+- `ColumnMetadata.getIndexSizeMap()` has been removed.
+- `ColumnMetadata.INDEX_NOT_FOUND` has been renamed to `UNAVAILABLE`.
+- `ColumnMetadata.getColumnMaxLength()` is deprecated for removal. Migrate to
+  `getLengthOfLongestElement()`.
+- `MapIndexReader` no longer has the reader generic parameter, and the API has
+  been simplified from `getKeyIndexes()` / `getKeyMetadata()` to
+  `getIndexes()` / `getColumnMetadata()`. The legacy helper methods
+  `getKeyReader()`, `getKeyFieldSpec()`, and `getKeyStoredType()` were also
+  removed.
+- `ColumnPartitionMetadata.extractPartitions(...)` now returns `IntSet`
+  instead of `Set<Integer>`, so downstream binaries must be recompiled.
+
+Segment backward compatibility is preserved. Pinot still reads the legacy
+`lengthOfEachEntry` metadata key when `lengthOfLongestElement` is absent, and
+new segments additionally persist `lengthOfShortestElement`,
+`lengthOfLongestElement`, and `isAscii`.
+
+**Action required for extension authors.** Rebuild and retest any custom code
+that implements `ColumnMetadata` or `MapIndexReader`, or that calls
+`ColumnPartitionMetadata.extractPartitions(...)`, before upgrading to Pinot
+1.6.0.
+
+### IndexType SPI now requires explicit dictionary-contract methods
+
+Apache Pinot 1.6.0 also changes the `IndexType<C, IR, IC>` SPI for custom
+index implementations. [PR #18365](https://github.com/apache/pinot/pull/18365)
+adds two new abstract methods that every `IndexType` implementation must
+define:
+
+- `requiresDictionary(FieldSpec, C)` returns `true` when the index's on-disk
+  representation depends on dictionary IDs and cannot be built or read without
+  a dictionary on the column.
+- `shouldInvalidateOnDictionaryChange(FieldSpec, C)` returns `true` when the
+  existing on-disk index must be deleted and rebuilt if the column gains or
+  loses a dictionary across segment reload.
+
+Pinot uses these hooks during segment creation and reload to decide whether it
+must materialize a shared standalone dictionary for RAW forward-index columns
+and whether existing index files can be reused safely. Built-in inverted, FST,
+and IFST indexes require a dictionary. The built-in range index can still work
+without a dictionary for numeric RAW columns, but any RAW forward index with a
+dictionary-backed range index must use range index version 2; range index
+version 1 is rejected for RAW + dictionary.
+
+[PR #17269](https://github.com/apache/pinot/pull/17269) adds the related column
+shape where a RAW forward index can share a standalone dictionary with
+dictionary-backed secondary indexes. Existing configs that combine legacy
+`tableIndexConfig.noDictionaryColumns` or `tableIndexConfig.noDictionaryConfig`
+with dictionary-backed secondary indexes still need a config migration before
+validation succeeds. Move the column to `fieldConfigList`, keep
+`encodingType: RAW`, remove the legacy no-dictionary entry, and declare
+`indexes.dictionary` with the secondary index, for example `indexes.inverted`,
+`indexTypes: ["FST"]`, or `indexTypes: ["IFST"]`.
+
+**Action required for custom index authors.** Recompile any external
+`IndexType` plugin against Pinot 1.6.0 and implement both methods before
+upgrading. Older binaries will fail with `AbstractMethodError` until updated.
+
+### `JsonIndexReader` now returns a read-only bitmap contract
+
+Apache Pinot also changes the `JsonIndexReader` SPI for custom JSON index
+readers and any code that calls the reader directly. [PR
+#18694](https://github.com/apache/pinot/pull/18694) changes all
+`getMatchingDocIds(...)` overloads to return `ImmutableRoaringBitmap` instead
+of `MutableRoaringBitmap`.
+
+This is a developer-facing compatibility change. Pinot's built-in `JSON_MATCH`
+behavior is unchanged, but direct SPI callers must now treat the returned
+bitmap as read-only. A reader may return a borrowed bitmap backed by the
+index's underlying storage, so the bitmap is only valid while the segment or
+index stays open and must not be mutated in place.
+
+The built-in OSS readers still return a fresh mutable bitmap through a
+covariant override, so custom readers can keep that behavior if they want. The
+important contract change is on the caller side:
+
+- Use `ImmutableRoaringBitmap` in code that stores the return value from
+  `getMatchingDocIds(...)`.
+- Call `toMutableRoaringBitmap()` first if your code needs to mutate the
+  bitmap.
+- Revalidate any custom JSON index reader, filter operator, or other
+  `pinot-segment-spi` integration that depends on this API before upgrading.
+
+### `extractRawTimeValues` replaces Avro `enableLogicalTypes`
+
+Apache Pinot 1.6.0 changes the ingestion config for Avro logical types and
+adds the same raw-value control to Parquet readers. `AvroRecordReaderConfig`
+and `ParquetRecordReaderConfig` now expose `extractRawTimeValues`, which
+defaults to `false`. In the default mode, Pinot continues converting temporal
+logical types during extraction. Set `extractRawTimeValues` to `true` only
+when you need raw integer values for `date`, `time-*`, or `timestamp-*`
+fields. `decimal` and `uuid` still convert in all cases.
+
+**Action required.** If your Avro ingestion config still uses
+`enableLogicalTypes`, remove it. To keep the default converted behavior, omit
+the new setting or set `extractRawTimeValues: false`. If you previously
+disabled logical-type conversion to preserve raw temporal values, move to
+`extractRawTimeValues: true` and revalidate any `decimal` or `uuid` fields,
+because those types no longer have a raw passthrough mode.
+
+*Source: [PR #18400](https://github.com/apache/pinot/pull/18400)*
+
+### Removal of deprecated controller configuration constants
+
+
+The following 12 controller configuration constants that were deprecated since v0.8.0 (2020-2021) have been removed:
+
+| Deprecated Constant | Replacement Constant | Property Name |
+| --- | --- | --- |
+| `DEPRECATED_RETENTION_MANAGER_FREQUENCY_IN_SECONDS` | `RETENTION_MANAGER_FREQUENCY_PERIOD` | `controller.retention.frequencyPeriod` |
+| `DEPRECATED_OFFLINE_SEGMENT_INTERVAL_CHECKER_FREQUENCY_IN_SECONDS` | `OFFLINE_SEGMENT_INTERVAL_CHECKER_FREQUENCY_PERIOD` | `controller.offline.segment.interval.checker.frequencyPeriod` |
+| `DEPRECATED_REALTIME_SEGMENT_VALIDATION_FREQUENCY_IN_SECONDS` | `REALTIME_SEGMENT_VALIDATION_FREQUENCY_PERIOD` | `controller.realtime.segment.validation.frequencyPeriod` |
+| `DEPRECATED_STATUS_CHECKER_FREQUENCY_IN_SECONDS` | `STATUS_CHECKER_FREQUENCY_PERIOD` | `controller.status.checker.frequencyPeriod` |
+| `DEPRECATED_OFFLINE_SEGMENT_INTERVAL_CHECKER_INITIAL_DELAY_IN_SECONDS` | `OFFLINE_SEGMENT_INTERVAL_CHECKER_INITIAL_DELAY_IN_SECONDS` | `controller.offlineSegmentIntervalChecker.initialDelayInSeconds` |
+| `DEPRECATED_REALTIME_SEGMENT_VALIDATION_INITIAL_DELAY_IN_SECONDS` | `REALTIME_SEGMENT_VALIDATION_INITIAL_DELAY_IN_SECONDS` | `controller.realtime.segment.validation.initialDelayInSeconds` |
+| `DEPRECATED_STATUS_CHECKER_INITIAL_DELAY_IN_SECONDS` | `STATUS_CHECKER_INITIAL_DELAY_IN_SECONDS` | `controller.status.checker.initialDelayInSeconds` |
+| `DEPRECATED_RETENTION_MANAGER_INITIAL_DELAY_IN_SECONDS` | `RETENTION_MANAGER_INITIAL_DELAY_IN_SECONDS` | `controller.retentionManager.initialDelayInSeconds` |
+| `DEPRECATED_BROKER_RESOURCE_VALIDATION_FREQUENCY_IN_SECONDS` | `BROKER_RESOURCE_VALIDATION_FREQUENCY_PERIOD` | `controller.broker.resource.validation.frequencyPeriod` |
+| `DEPRECATED_LEAD_CONTROLLER_RESOURCE_ENABLED` | `LEAD_CONTROLLER_RESOURCE_ENABLED` | `controller.leadController.resource.enabled` |
+| `DEPRECATED_SEGMENT_RELOCATOR_FREQUENCY_IN_SECONDS` | `SEGMENT_RELOCATOR_FREQUENCY_PERIOD` | `controller.segment.relocator.frequencyPeriod` |
+| `DEPRECATED_SEGMENT_RELOCATOR_INITIAL_DELAY_IN_SECONDS` | `SEGMENT_RELOCATOR_INITIAL_DELAY_IN_SECONDS` | `controller.segment.relocator.initialDelayInSeconds` |
+
+These constants have had explicit replacements available since v0.8.0, which have been in production use for several years.
+
+**Action required.** If your cluster still uses any of the deprecated configuration keys (the old property names shown above), you must migrate to the replacement property names before upgrading to this release. The controller will no longer recognize or fall back to the deprecated configuration keys.
+
+Check your controller configuration files and any automation that generates controller configurations to ensure they use the new property names.
+
+*Source: [PR #18001](https://github.com/apache/pinot/pull/18001)*
+
+
+
+## 1.4.0
+
+### Schema enforcement on controller startup
+
+The controller now validates that every table has both a `TableConfig` and a
+`Schema` when it starts up. If either is missing, the controller exits by
+default.
+
+Two controller properties control this behavior:
+
+| Property | Default | Effect |
+| --- | --- | --- |
+| `controller.startup.exitOnTableConfigCheckFailure` | `true` | Exit if any table is missing its `TableConfig` |
+| `controller.startup.exitOnSchemaCheckFailure` | `true` | Exit if any table is missing its `Schema` |
+
+**Action required.** Before upgrading, verify that every table has a schema. If
+you have tables without schemas (for example, legacy tables created before
+schema enforcement existed), either add the missing schemas or set both
+properties to `false` until you can fix them.
+
+*Source:
+[BaseControllerStarter.java — `enforceTableConfigAndSchema()`](https://github.com/apache/pinot/pull/15333)*
+
+### Default segment load mode changed to MMAP
+
+The default value of `loadMode` in `TableConfig` changed from `HEAP` to `MMAP`
+for newly created tables. Existing tables are not affected; their `loadMode`
+stays as configured.
+
+If your deployment relies on heap-based segment loading for new tables, set
+`loadMode` to `HEAP` explicitly in the table config.
+
+*Source:
+[TableConfigBuilder.java — `DEFAULT_LOAD_MODE`](https://github.com/apache/pinot/pull/15089)*
+
+### Workload-based query resource isolation
+
+A new `QueryWorkloadConfig` model lets administrators define named workloads
+with CPU and memory budgets. Queries are assigned to workloads using the
+`WORKLOAD_NAME` query option.
+
+Key cluster-level configuration properties:
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `accounting.workload.enable.cost.collection` | `false` | Enable workload cost tracking |
+| `accounting.workload.enable.cost.enforcement` | `false` | Enable enforcement of budgets |
+| `accounting.workload.enforcement.window.ms` | `60000` | Enforcement window duration (ms) |
+| `accounting.workload.sleep.time.ms` | `1` | Polling interval for enforcement |
+| `accounting.secondary.workload.name` | `defaultSecondary` | Name of the secondary workload |
+| `accounting.secondary.workload.cpu.percentage` | `0.0` | CPU percentage cap for the secondary workload |
+
+This feature adds accounting-based workload budgets on brokers and servers.
+The later `workload` scheduler can build on the same workload names, but these
+configs do not require that scheduler.
+
+**Action required.** None unless you want to adopt workload isolation. The
+feature is opt-in and disabled by default.
+
+*Source:
+[QueryWorkloadConfig.java](https://github.com/apache/pinot/pull/15109)*
+
+### Server-level segment batching for rebalance
+
+A new `batchSizePerServer` parameter on the rebalance API controls how many
+segment moves are applied per server in each rebalance step. The default is
+`-1` (disabled — all segments are moved in a single step, as before).
+
+Setting a positive value, such as `100`, reduces the blast radius of each
+rebalance step and gives the cluster time to recover between batches.
+
+**Action required.** None unless you want to adopt batched rebalancing.
+Consider enabling it for large tables or latency-sensitive clusters.
+
+*Source:
+[RebalanceConfig.java — `batchSizePerServer`](https://github.com/apache/pinot/pull/15617)*
+
+### Upsert config deprecations: `enableSnapshot` and `enablePreload`
+
+The boolean fields `enableSnapshot` and `enablePreload` in `UpsertConfig` are
+deprecated in favor of the `Enablement` enum fields `snapshot` and `preload`.
+The `Enablement` enum accepts `ENABLE`, `DISABLE`, or `DEFAULT`.
+
+Using `DEFAULT` causes the table to inherit the instance-level setting,
+which was not possible with the old boolean fields.
+
+The old boolean setters still work for backward compatibility, but new table
+configs should use the enum fields.
+
+**Action required.** Update table configs at your convenience. The old fields
+still function but will be removed in a future release.
+
+*Source:
+[UpsertConfig.java](https://github.com/apache/pinot/pull/15528)*
+
+### Task throttling based on heap usage
+
+Server-side MSE and segment-split tasks are now throttled when heap usage
+exceeds a configurable threshold. Queued tasks resume when heap usage drops.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `accounting.oom.alarming.heap.usage.ratio` | `0.75` | Log warnings above this ratio |
+| `accounting.oom.critical.heap.usage.ratio` | `0.96` | Begin throttling tasks above this ratio |
+| `accounting.oom.panic.heap.usage.ratio` | `0.99` | Aggressive back-off above this ratio |
+
+**Action required.** None. The defaults are conservative, but you should
+verify they are compatible with your heap-sizing strategy, especially on
+servers that run large MSE queries.
+
+*Source:
+[ThrottleOnCriticalHeapUsageExecutor.java](https://github.com/apache/pinot/pull/16271)*
+
+### Pauseless consumption (new feature)
+
+Pinot 1.4.0 introduces pauseless consumption, which allows real-time ingestion
+to continue while the previous segment is being built and uploaded. This is a
+new opt-in feature; it does not change behavior for existing tables.
+
+Operators enabling pauseless consumption should review the
+[pauseless consumption runbook](pauseless-consumption.md) and
+be aware that it is compatible with dedup and partial-upsert tables.
+
+### Row-level security (new feature)
+
+Row-level security (RLS) policies can now restrict which rows are visible to
+different users or groups. This is relevant in multi-tenant deployments. No
+existing behavior changes; RLS must be explicitly configured.
+
+*Source: [PR #16043](https://github.com/apache/pinot/pull/16043)*
+
+### Logical type support enabled by default in Avro
+
+The Pinot Avro ingestion plugin now automatically handles Avro logical types
+such as timestamps and decimals. Previously this required manual configuration.
+
+**Action required.** If your ingestion pipeline relied on raw Avro bytes for
+logical-type fields (for example, treating a timestamp as a plain long), verify
+that the new automatic conversion does not change your stored values.
+
+*Source: [PR #15654](https://github.com/apache/pinot/pull/15654)*
+
+### Segment reindex throttle
+
+A new `ClusterConfigChangeHandler` on servers adds throttling for segment
+reindexing operations triggered by cluster configuration changes. This
+prevents excessive I/O when many segments need reindexing simultaneously.
+
+*Source: [PR #14894](https://github.com/apache/pinot/pull/14894)*
+
+---
+
+## 1.3.0
+
+### Binary workload scheduler for query isolation
+
+The `BinaryWorkloadScheduler` categorizes queries into a primary workload
+(unbounded, FCFS) and a secondary workload with strict concurrency and thread
+limits. Secondary queries that exceed the queue limit are pruned.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `binarywlm.maxSecondaryRunnerThreads` | `5` | Max worker threads for the secondary workload |
+
+To assign a query to the secondary workload, set the query option
+`isSecondaryWorkload=true`.
+
+**Action required.** None unless you want to isolate ad-hoc or low-priority
+traffic. The feature is opt-in via the query scheduler algorithm selection.
+
+*Source:
+[BinaryWorkloadScheduler.java](https://github.com/apache/pinot/pull/13847)*
+
+### Database-level query quota
+
+Operators can now impose query-rate limits at the database level. Quotas are
+configured per database via a `DatabaseConfig` znode in the Helix property
+store.
+
+| API | Method | Path |
+| --- | --- | --- |
+| Set quota | POST | `/databases/{databaseName}/quotas?maxQueriesPerSecond=` |
+| Get quota | GET | `/databases/{databaseName}/quotas` |
+
+A default cluster-wide limit can be set with the cluster config key
+`databaseMaxQueriesPerSecond`. The default in code is `-1` (disabled); the
+release notes reference a default of `1000`, which is the suggested starting
+value.
+
+Per-broker quotas adjust dynamically based on the number of live brokers.
+
+**Action required.** If you use the database construct, consider setting
+database-level quotas to prevent noisy-neighbor issues.
+
+*Source: [PR #13544](https://github.com/apache/pinot/pull/13544)*
+
+### Cursor-based query pagination
+
+Cursor support lets clients consume large result sets in smaller chunks. A new
+`numRows` parameter on `POST /query/sql` enables pagination, and a
+`/resultStore` API manages result sets.
+
+No behavior change for existing queries. Operators should be aware that the
+result store consumes broker memory; monitor heap usage if cursors are enabled.
+
+*Source: [PR #14110](https://github.com/apache/pinot/pull/14110)*
+
+### Multi-stream ingestion — Kafka bug warning
+
+{% hint style="warning" %}
+Multi-stream ingestion for Kafka contains a known bug in 1.3.0 and is **not
+production-ready** in this release. The fix is available in
+[PR #15094](https://github.com/apache/pinot/pull/15094) and is included in
+1.4.0.
+{% endhint %}
+
+**Action required.** Do not use multi-stream Kafka ingestion in 1.3.0. Wait
+for 1.4.0 or cherry-pick the fix.
+
+### TLS support for multi-stage engine mailboxes
+
+TLS can now be configured between brokers and servers for the multi-stage
+engine. Previously, inter-component traffic for MSE was unencrypted even when
+TLS was enabled for other channels.
+
+**Action required.** If your deployment requires end-to-end encryption,
+configure TLS for MSE mailboxes after upgrading.
+
+*Source: [PR #14476](https://github.com/apache/pinot/pull/14476),
+[PR #14387](https://github.com/apache/pinot/pull/14387)*
+
+### OOM protection for multi-stage queries
+
+Guard rails are now in place to limit memory consumption during MSE query
+execution, including per-block row tracking for cross joins and configurable
+max-rows-in-join limits.
+
+**Action required.** Review the default limits if you run large joins. The
+defaults protect against runaway queries but may need tuning for legitimate
+large-join workloads.
+
+*Source: [PR #13598](https://github.com/apache/pinot/pull/13598),
+[PR #13955](https://github.com/apache/pinot/pull/13955)*
+
+---
+
+## 1.2.0
+
+### Column-major segment builder on by default
+
+New tables default to `columnMajorSegmentBuilderEnabled = true`. This skips
+the intermediate row-major conversion during segment commits and is both
+faster and more space-efficient.
+
+Existing tables are unaffected. If you need the legacy row-major builder for a
+new table, explicitly set `columnMajorSegmentBuilderEnabled` to `false` in the
+table config's `IndexingConfig`.
+
+*Source:
+[IndexingConfig.java](https://github.com/apache/pinot/pull/12770)*
+
+### Lucene upgraded to 9.11.1
+
+The bundled Apache Lucene version was upgraded from 9.x to 9.11.1. This is a
+transparent dependency upgrade with no configuration changes required, but
+operators should be aware of it when troubleshooting text-index behavior
+changes.
+
+{% hint style="info" %}
+The `master` branch has since moved to Lucene 9.12.0.
+{% endhint %}
+
+*Source: [PR #13505](https://github.com/apache/pinot/pull/13505)*
+
+### Minion resource isolation
+
+Minions now support instance-tag-based resource isolation. You can configure a
+tag per task type per table, allowing arbitrary assignment of minion nodes to
+workloads.
+
+**Action required.** None for existing setups. Operators who want isolation
+should tag minion instances and update table-level task configs.
+
+*Source: [PR #12459](https://github.com/apache/pinot/pull/12459)*
+
+### Consistent upsert table view
+
+A new `upsertConfig.consistencyMode` field accepts `NONE`, `SYNC`, or
+`SNAPSHOT`. The default is `NONE` (no change from prior behavior).
+
+| Mode | Trade-off |
+| --- | --- |
+| `NONE` | Best throughput; no consistency guarantee across segments |
+| `SYNC` | Strong freshness; higher query latency; suited for low-QPS tables |
+| `SNAPSHOT` | High-QPS/high-ingestion; periodic snapshot refresh controlled by `upsertViewFreshnessMs` query option |
+
+**Action required.** None unless you need stronger consistency for upsert
+queries. Evaluate `SYNC` or `SNAPSHOT` based on your latency and freshness
+requirements.
+
+*Source: [PR #12976](https://github.com/apache/pinot/pull/12976)*
+
+### CLP compression codec for forward indexes
+
+The [CLP](https://github.com/y-scope/clp) compression codec is now available
+for forward indexes. It offers high compression ratios for log-like string
+columns. Enable it by setting `compressionCodec: CLP` in the column's
+`fieldConfigList`.
+
+**Action required.** Opt-in only. Test compression ratios and query
+performance on a staging cluster before enabling in production.
+
+*Source: [PR #12504](https://github.com/apache/pinot/pull/12504)*
+
+---

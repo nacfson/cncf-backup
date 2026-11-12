@@ -1,0 +1,553 @@
+---
+title: "Multimodal Tables"
+description: "Create and modify tables through `pypaimon.multimodal`."
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Multimodal Tables
+
+Create and modify tables through `pypaimon.multimodal`. Work through Connect, Create, and Add in order to obtain the `conn` and `docs` objects used below. The creation tabs are alternatives; later examples state when a different schema is needed.
+
+A multimodal connection wraps a Paimon catalog and a default database. Its table
+API manages scalar, text, vector, and BLOB data on data-evolution tables without
+primary keys. Each `add`, `overwrite`, `update`, or `delete` call handles its own
+commit; use the [Python API](./python-api) for explicit writer and commit control.
+
+Creating a multimodal table enables `row-tracking.enabled`,
+`data-evolution.enabled`, and `blob-as-descriptor` by default.
+Global index scans use full fallback coverage
+through `global-index.search-mode` set to `FULL`. Data files use Paimon's
+default Parquet format, including vector columns. To store vectors in dedicated
+files, explicitly set `vector.file.format`, for example to `parquet`.
+Deletion vectors are disabled by default; enable them with
+`deletion-vectors.enabled` set to `true` in the table creation options.
+These defaults require no file-format extra:
+
+```shell
+pip install pypaimon
+```
+
+Vortex remains available as an optional format when explicitly configured.
+
+
+## Connect
+
+`connect` creates a multimodal connection from Paimon catalog options. The
+`options` argument is forwarded to `CatalogFactory.create`.
+
+<Tabs groupId="pypaimon-multimodal-connect">
+
+<TabItem value="filesystem" label="Filesystem catalog" default>
+
+```python
+import pypaimon.multimodal as pm
+
+conn = pm.connect(
+    database="default",
+    options={
+        "warehouse": "file:///tmp/warehouse",
+    },
+)
+```
+
+</TabItem>
+
+<TabItem value="rest" label="REST catalog">
+
+```python
+import pypaimon.multimodal as pm
+
+conn = pm.connect(
+    database="default",
+    options={
+        "metastore": "rest",
+        "uri": "http://localhost:8080",
+        "warehouse": "catalog_name",
+        # Optional authentication and storage options go here.
+        # "token.provider": "...",
+    },
+)
+```
+
+REST catalog options use the same keys as the lower-level PyPaimon catalog API.
+See [REST](../concepts/rest/) for server-side catalog configuration.
+
+</TabItem>
+
+</Tabs>
+
+Table names without a database are resolved against the connection's default
+database. Fully-qualified names such as `"analytics.docs"` are also accepted.
+Use `get_table` to open an existing multimodal table. The table must be a
+data-evolution table without primary keys.
+
+```python
+docs = conn.get_table("docs")
+```
+
+## Create
+
+<Tabs groupId="pypaimon-multimodal-create-table">
+
+<TabItem value="schema" label="Create from schema" default>
+
+```python
+import pyarrow as pa
+
+docs = conn.create_table(
+    "docs",
+    schema=pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("content", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32(), 3)),
+        pa.field("image", pa.large_binary()),
+        pa.field("category", pa.string()),
+    ]),
+    ignore_if_exists=True,
+)
+```
+
+</TabItem>
+
+<TabItem value="data" label="Create from data">
+
+```python
+docs = conn.create_table(
+    "docs",
+    data=[
+        {
+            "id": 1,
+            "content": "Apache Paimon supports mutable lakehouse tables.",
+            "category": "lake",
+        }
+    ],
+)
+```
+
+</TabItem>
+
+<TabItem value="partitioned" label="Create partitioned table">
+
+```python
+import pyarrow as pa
+
+docs = conn.create_table(
+    "docs_by_day",
+    schema=pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("content", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32(), 3)),
+        pa.field("category", pa.string()),
+        pa.field("dt", pa.string()),
+    ]),
+    partitioned=["dt"],
+    options={
+        "snapshot.time-retained": "7 d",
+    },
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+Partition keys can be specified with `partitioned`, and table options can be
+specified with `options`. The multimodal API accepts `pyarrow.Schema` objects;
+it does not accept field dictionaries or `pypaimon.Schema`. Use Arrow fixed-size
+list types for vector columns, and Arrow binary or large-binary types for blob
+columns. When creating from data, pass an explicit schema if you need exact
+vector or blob types.
+
+## Add
+
+`add` accepts `pyarrow.Table`, `pyarrow.RecordBatch`, a list of dictionaries, a
+dictionary of arrays, or a pandas DataFrame. Input columns are aligned and cast
+to the Paimon table schema before writing. For a BLOB column, list, dictionary,
+and pandas inputs may also contain `Blob` or `BlobDescriptor` objects. A
+descriptor-backed `Blob` is copied through its stream; it is not first loaded
+into Python memory.
+
+```python
+docs.add([
+    {
+        "id": 2,
+        "content": "Paimon stores mutable lakehouse tables.",
+        "embedding": [0.4, 0.5, 0.6],
+        "category": "lake",
+    }
+])
+```
+
+## Overwrite
+
+`overwrite` accepts the same input formats as `add` and replaces existing data
+using Paimon's batch overwrite semantics. On an unpartitioned table it replaces
+the whole table. On a partitioned table it follows the table's
+`dynamic-partition-overwrite` option; with the default dynamic mode, only
+partitions present in the input data are replaced.
+
+```python
+docs.overwrite([
+    {
+        "id": 3,
+        "content": "Fresh replacement text",
+        "embedding": [0.7, 0.8, 0.9],
+        "category": "docs",
+    }
+])
+```
+
+The static overwrite example below uses a separate partitioned table and disables
+dynamic partition overwrite when creating it. Pass the partition to replace:
+
+```python
+docs_by_day = conn.create_table(
+    "docs_static_overwrite",
+    schema=pa.schema([
+        ("id", pa.int64()),
+        ("content", pa.string()),
+        ("category", pa.string()),
+        ("dt", pa.string()),
+    ]),
+    partitioned=["dt"],
+    options={"dynamic-partition-overwrite": "false"},
+)
+docs_by_day.overwrite(
+    [
+        {
+            "id": 4,
+            "content": "Only this day is replaced.",
+            "category": "docs",
+            "dt": "2024-01-01",
+        }
+    ],
+    partition={"dt": "2024-01-01"},
+)
+```
+
+## Update
+
+`update` modifies rows matched by a SQL-like predicate.
+
+```python
+docs.update(
+    where="id = 2",
+    values={"category": "docs"},
+)
+
+# Target a row using a row ID obtained from this table.
+docs.update(where="_ROW_ID = 42", values={"category": "docs"})
+```
+
+On row-tracking tables, `update` accepts `_ROW_ID` conditions, including `IN`
+and combinations with business-column predicates using `AND` or `OR`.
+Only matching visible rows are updated; missing or deleted row IDs do not
+match, and no rows are inserted. `_ROW_ID` cannot be assigned a new value.
+The method returns the table and uses the existing predicate-update backend.
+For external per-row values with strict matching of every supplied ID, use
+`update_columns_by_row_id` instead.
+Updates with `_ROW_ID` predicates require the handle's schema to match the
+current target branch. Reopen the table after schema changes or a branch copy
+with a different schema; mismatches are rejected before writing.
+
+`_ROW_ID` conditions are currently supported only by `update`, not by
+`delete` or `scan().where(...)`. Calling `with_row_id()` on a scan adds the
+ID to its output; it does not enable `_ROW_ID` string conditions. Use
+`take_row_ids(...)` for lookups by row ID.
+
+On a frame table, updating ordinary columns leaves the configured
+`video-frame-field` untouched. Replacing that field requires the specialized
+`replace_video()` API described in [Video Frame Storage](./video#update-frame-rows-and-replace-a-video).
+
+## Column Enrichment
+
+Use `pypaimon.multimodal` to backfill labels or features on a Data Evolution
+append table without managing row IDs and commit messages. These tables have no
+primary key, use `bucket=-1`, and enable both row tracking and data evolution.
+The multimodal connection sets these options when creating a table.
+
+```python
+import pyarrow as pa
+import pyarrow.compute as pc
+import pypaimon.multimodal as pmm
+
+connection = pmm.connect(options={"warehouse": "/tmp/column-enrichment"})
+frames = connection.create_table(
+    "frames",
+    schema=pa.schema([("sample_id", pa.int64()), ("image", pa.large_binary())]),
+    data=[{"sample_id": 1, "image": b"first"},
+          {"sample_id": 2, "image": b"second"}],
+)
+
+# Import external labels. The nullable label column is created automatically.
+result = frames.merge_columns(
+    pa.table({"sample_id": [2], "label": ["pedestrian"]}), on="sample_id")
+print(result.added_columns)  # ('label',); the first row's label remains NULL
+
+# Derive a new column. Only image is passed to the function; row IDs are internal.
+def image_sizes(batch):
+    return pa.table({"image_size": pc.binary_length(batch["image"]).cast(pa.int64())})
+
+result = frames.add_columns(
+    schema=pa.schema([("image_size", pa.int64())]),
+    inputs=["image"], fn=image_sizes, batch_size=128)
+print(result.updated_rows)  # 2
+
+# A schema-only addition does not backfill values or create a data snapshot.
+frames.add_columns(pa.schema([("caption", pa.string())]))
+
+# Recompute an existing column without changing its schema.
+result = frames.compute_columns(
+    ["image_size"], inputs=["image"], fn=image_sizes, batch_size=128)
+
+# Import annotations carrying row IDs from this table, in any order.
+result = frames.update_columns_by_row_id(pa.table({
+    "_ROW_ID": pa.array([1, 0], type=pa.int64()),
+    "label": ["vehicle", "pedestrian"],
+}), columns=["label"])
+```
+
+For embeddings, declare a fixed-size list such as
+`pa.list_(pa.float32(), 768)` and return arrays of that type. The function returns
+an Arrow Table or RecordBatch containing exactly the declared output columns,
+with the same row count and order as its input. Inputs are RecordBatches of at
+most `batch_size` rows. Functions should be deterministic and side-effect-free.
+Ordinary BLOB inputs are bytes; video-frame inputs retain their descriptor
+semantics and need decoding in the function. With no `fn`, omit `inputs`.
+New columns must be nullable; existing column names are rejected by `add_columns`.
+
+`compute_columns` fills or replaces existing columns without changing the schema.
+`columns` is a name or a sequence
+of names; output types and nullability come from the table schema. The function
+follows the same batch contract as `add_columns`. Every call processes all
+visible rows in the captured source snapshot, including rows whose output values
+are already non-NULL. Inputs may also be outputs. Partition and system columns
+cannot be outputs; use `replace_video` for configured video-frame outputs.
+Use this method after a schema-only addition or to recompute a column left by
+failed `add_columns` computation. A new call starts a complete run, without
+resuming an earlier run or retrying function calls automatically.
+
+To backfill a new column or recompute an existing one on Ray, install
+`pypaimon[ray]` and set `execution="ray"` on `add_columns` or `compute_columns`.
+For `add_columns`, Ray execution requires `fn`. Before publishing the schema,
+the driver validates the Ray task definition. In `ray_remote_args["resources"]`,
+it rejects reserved keys such as `bundle`, requires integer or floating-point
+quantities, and checks that positive quantities have ASCII resource names.
+Ray checks placement group compatibility at task submission, and runtime
+environment setup and the function can fail during execution. If submission or
+execution fails before the data commit, the new columns remain visible as NULL.
+The driver plans one source snapshot and assigns complete
+Data Evolution file groups to workers. Each worker reads the requested inputs
+and uses the Python shard updater to prepare the output files. The driver
+publishes them in one commit after all shards succeed. A worker failure leaves
+the prepared files unpublished. The following call adds `image_size` to a table
+that does not already have that column.
+
+```python
+result = frames.add_columns(
+    pa.schema([("image_size", pa.int64())]), inputs=["image"], fn=image_sizes, batch_size=128,
+    execution="ray", concurrency=4, ray_remote_args={"num_cpus": 1},
+)
+```
+
+`concurrency` caps the number of shards and defaults to four. Parallelism also
+depends on the number of complete file groups and available Ray resources.
+`ray_remote_args` accepts task resource options such as `num_gpus`. The function
+must be serializable by Ray, and workers need its dependencies and access to
+the table storage. Ray task retries are disabled for this write operation.
+
+`merge_columns` accepts the same key forms as `merge`: a name, a list of names,
+or a mapping from target names to source names. It updates only non-key columns
+present in the source and never inserts rows. Omitted columns keep their values;
+explicit NULL values clear nullable columns. New columns are nullable and use the
+source's Arrow types; existing output types must match the table types. Matching
+and key type conversion follow ordinary `merge` semantics: unmatched source rows
+are ignored, NULL keys do not match, and one source row can update multiple target
+rows with the same key. Multiple source rows matching the same target row are
+rejected by the MERGE executor. Partition and match keys cannot be updated;
+use `replace_video` to replace configured video-frame columns.
+
+`update_columns_by_row_id(data, *, columns)` accepts one local Arrow Table
+and requires an explicit output column name or sequence of names. The input
+must contain `_ROW_ID` and each selected output column exactly once. Only
+selected columns are written; extra input columns are ignored, so carrying old
+values for other columns does not overwrite their current values.
+IDs must be unique, non-NULL,
+non-negative integers representable as int64. All IDs must identify visible rows
+in the captured snapshot; missing or deleted IDs reject the entire call before
+writing. Input order does not affect matching, even when business keys repeat.
+Outputs must be existing, non-partition columns with the table's types and
+nullability. Other system columns and video-frame outputs are rejected; use
+`replace_video` for video-frame columns. Omitted rows keep their values and
+explicit NULL values clear nullable outputs. No rows or columns are added.
+Empty input creates no data snapshot. The method does not remap historical row
+IDs or determine whether external annotations are stale.
+A table schema that differs from the current target branch is rejected before
+writing; reopen the table after external schema changes or a branch copy with
+a different schema.
+
+Rollback followed by a new append can reuse both row IDs and numeric snapshot
+IDs. Discard pending annotations from the rolled-back history before writing
+them back. A matching numeric snapshot ID alone does not establish that those
+annotations are still valid.
+
+`merge_columns` delegates matching and updates to the standard MERGE executor.
+With a compatible `pypaimon_rust` runtime and `write.native.enabled=true`,
+supported tables use native MERGE without a separate Python target-key scan.
+Local `add_columns` and `compute_columns` can use the native shard reader and writer
+with the same option; the supplied `fn` still runs in Python. Unsupported native
+routes select Python before execution.
+`update_columns_by_row_id` uses the standard row-ID update backend with the same
+native selection rules. ID visibility checks and writing use the same captured
+snapshot, and all prepared updates are committed together.
+
+All four methods retain files for untouched columns. Computing an image embedding
+still reads the image, but does not rewrite it. Normal partial updates write the
+selected columns over affected file row-ID ranges; they are not single-cell
+physical writes. `add_columns` and `compute_columns` buffer outputs per original
+file group so a small function batch does not repeatedly rewrite the same group.
+`batch_size` bounds function input rows, not total memory usage.
+
+These are single-writer operations on a current full-table view.
+As with other table methods, reopen the table after external schema changes.
+Time-travel and incremental table views are rejected. `merge_columns` materializes
+the source as an Arrow table; target matching is handled by the selected MERGE
+executor. The read snapshot is fixed for the
+operation. Coordinate writers for the entire call.
+The APIs do not provide automatic function retries or checkpoints.
+
+Successful calls return `ColumnUpdateResult` with added column names,
+the source and final data snapshot IDs, and the schema ID. `updated_rows` is the
+computed row count for `add_columns` (zero for schema-only additions) and
+`compute_columns`, and `None` for `merge_columns`, because MERGE does not return
+logical row counts. `update_columns_by_row_id` reports the input row count in
+`updated_rows`. Both it and `compute_columns` return `added_columns=()` and leave
+the schema unchanged on success or failure. Schema-only changes
+leave the data snapshot ID unchanged. Schema publication and data publication
+are separate operations. Failures during schema publication or data preparation
+and commit raise `ColumnUpdateError` with the underlying error as `__cause__`.
+For Ray worker failures, the original exception type is preserved only if Ray
+can serialize and deserialize the exception. If Ray cannot restore it, the
+cause can be a Ray error containing the worker traceback.
+
+| Attribute | Meaning |
+| --- | --- |
+| `phase` | The stage that failed: schema, validate, compute, write, commit, result, or close |
+| `schema_changed` | `True` if schema publication succeeded, `False` if it did not start, or `None` if its outcome is unknown |
+| `schema_id` | The last known schema ID |
+| `source_snapshot_id` | The snapshot used to match or compute rows |
+| `commit_outcome` | `not_started`, `unknown`, or `committed` |
+
+Input shape and type validation errors remain ordinary exceptions. Missing or
+deleted row IDs raise `ColumnUpdateError` with `phase="validate"` and
+`commit_outcome="not_started"`. Failed
+computation can leave new columns visible as NULL, without publishing any data
+updates. Prepared files are retained on failure; ordinary orphan-file maintenance
+can remove abandoned files. If publication has an unknown outcome, inspect the
+table before deciding whether to retry. Do not automatically retry the function
+or delete prepared files after a commit error.
+
+## Delete
+
+`delete` removes rows matched by a SQL-like predicate on business columns.
+It shares business-column predicate syntax with `scan().where(...)` and
+`update(...)`; `_ROW_ID` conditions are supported only by `update`. Row-level deletes
+require `deletion-vectors.enabled` set to `true` when creating the table.
+On partitioned tables, a predicate that references only partition columns uses
+the partition drop path.
+
+```python
+docs.delete(where="id = 2")
+```
+
+## Merge
+
+Use `merge` for idempotent ingestion and matched-row deletes. The builder
+delegates to Paimon's local `MERGE INTO` implementation.
+
+`execute` takes the source rows for the merge. It accepts the same input formats
+as `add`, including `pyarrow.Table`, `pyarrow.RecordBatch`, a list of
+dictionaries, a dictionary of arrays, or a pandas DataFrame. A list of
+dictionaries is convenient for small batches. `when_matched_update()` updates
+the columns present in the source data and leaves omitted target columns
+unchanged. `when_matched_delete()` deletes matched rows.
+`when_not_matched_insert()` inserts the columns present in the source data and
+fills omitted target columns with null.
+
+```python
+from pypaimon.multimodal import source_col
+
+docs.merge("id") \
+    .when_matched_update(
+        where="source.category != target.category",
+    ) \
+    .when_not_matched_insert() \
+    .execute([
+        {
+            "id": 2,
+            "content": "Updated text",
+            "embedding": [0.7, 0.8, 0.9],
+            "category": "docs",
+        }
+    ])
+```
+
+Use `when_matched_delete()` for matched rows that should be removed. The table
+must have `deletion-vectors.enabled` set to `true`:
+
+```python
+docs.merge("id") \
+    .when_matched_delete(where="source.deleted = TRUE") \
+    .when_matched_update() \
+    .execute([
+        {
+            "id": 2,
+            "content": "Updated text",
+            "embedding": [0.7, 0.8, 0.9],
+            "category": "docs",
+            "deleted": True,
+        }
+    ])
+```
+
+Clause predicates use `where` for update and delete clauses. Refer to source
+rows with `source.<column>` and target rows with `target.<column>`. Merge clause
+predicates require Python 3.10 or newer and
+`pip install 'pypaimon[datafusion]'`.
+
+When source and target key names differ, pass a mapping from target column to
+source column:
+
+```python
+docs.merge({"id": "doc_id"}) \
+    .when_matched_update({"category": source_col("new_category")}) \
+    .when_not_matched_insert({
+        "id": source_col("doc_id"),
+        "content": source_col("content"),
+        "category": source_col("new_category"),
+    }) \
+    .execute([
+        {"doc_id": 3, "content": "New doc", "new_category": "search"},
+    ])
+```

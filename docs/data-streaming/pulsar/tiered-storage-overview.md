@@ -1,0 +1,98 @@
+---
+id: tiered-storage-overview
+title: Overview of tiered storage
+sidebar_label: "Overview"
+description: Get a comprehensive understanding of use cases, installation methods, and working principles of Pulsar tiered storage.
+---
+
+Pulsar's **Tiered Storage** feature allows older backlog data to be moved from BookKeeper to long-term and cheaper storage, while still allowing clients to access the backlog as if nothing has changed.
+
+* Tiered storage uses [Apache jclouds](https://jclouds.apache.org) to support [Amazon S3](https://aws.amazon.com/s3/), [GCS (Google Cloud Storage)](https://cloud.google.com/storage/), [Azure](https://azure.microsoft.com/en-us/services/storage/blobs/) and [Aliyun OSS](https://www.aliyun.com/product/oss) for long-term storage.
+  * Read how to [Use AWS S3 offloader with Pulsar](tiered-storage-aws.md);
+  * Read how to [Use GCS offloader with Pulsar](tiered-storage-gcs.md);
+  * Read how to [Use Azure BlobStore offloader with Pulsar](tiered-storage-azure.md);
+  * Read how to [Use Aliyun OSS offloader with Pulsar](tiered-storage-aliyun.md);
+  * Read how to [Use S3 offloader with Pulsar](tiered-storage-s3.md).
+* Tiered storage uses [Apache Hadoop](http://hadoop.apache.org/) to support filesystems for long-term storage.
+  * Read how to [Use filesystem offloader with Pulsar](tiered-storage-filesystem.md).
+
+:::tip
+
+The [AWS S3 offloader](tiered-storage-aws.md) registers specific AWS metadata, such as regions and service URLs and requests bucket location before performing any operations. If you cannot access the Amazon service, you can use the [S3 offloader](tiered-storage-s3.md) instead since it is an S3 compatible API without the metadata.
+
+:::
+
+
+## When to use tiered storage?
+
+Tiered storage should be used when you have a topic for which you want to keep a very long backlog for a long time.
+
+For example, if you have a topic containing user actions that you use to train your recommendation systems, you may want to keep that data for a long time, so that if you change your recommendation algorithm, you can rerun it against your full user history.
+
+## How to install tiered storage offloaders?
+
+Pulsar releases a separate binary distribution, containing the tiered storage offloaders. To enable those offloaders, you need to complete the following steps.
+
+1. Download the offloaders tarball release.
+
+```bash
+wget @pulsar:offloader_release_url@
+```
+
+2. Untar the offloaders package and copy the offloaders as `offloaders` in the pulsar directory.
+
+```bash
+tar xvfz apache-pulsar-offloaders-@pulsar:version@-bin.tar.gz
+mv apache-pulsar-offloaders-@pulsar:version@/offloaders offloaders
+
+ls offloaders
+# tiered-storage-file-system-@pulsar:version@.nar
+# tiered-storage-jcloud-@pulsar:version@.nar
+```
+
+For more information on how to configure tiered storage, see [Tiered storage cookbook](cookbooks-tiered-storage.md).
+
+:::note
+
+* If you are running Pulsar in a bare metal cluster, make sure that `offloaders` tarball is unzipped in every broker's pulsar directory.
+* For [Docker](getting-started-docker.md) and [Kubernetes](deploy-kubernetes.md), the Pulsar `apachepulsar/pulsar` image includes the offloader NARs **except the filesystem (Hadoop) offloader**. If you need the filesystem offloader, install its NAR from the matching offloaders tarball in `/pulsar/offloaders` on every broker. The `pulsar-all` image is no longer produced.
+
+:::
+
+## How does tiered storage work?
+
+A topic in Pulsar is backed by a **log**, known as a **managed ledger**. This log is composed of an ordered list of segments. Pulsar only writes to the final segment of the log. All previous segments are sealed. The data within the segment is immutable. This is known as a **segment-oriented architecture**.
+
+![Tiered storage in Pulsar](/assets/pulsar-tiered-storage.png "Tiered Storage")
+
+Tiered storage works as follows:
+
+1. The tiered storage offloading mechanism takes advantage of the segment-oriented architecture. 
+
+  When offloading is requested, the segments of the log are copied one by one to tiered storage. All segments of the log (apart from the current segment) written to tiered storage can be offloaded.
+
+2. Data written to BookKeeper is replicated to 3 physical machines by default. 
+  
+  However, once a segment is sealed in BookKeeper, it becomes immutable and can be copied to long-term storage. Long-term storage has the potential to achieve significant cost savings.
+
+3. Before offloading ledgers to long-term storage, you need to configure buckets, credentials, and other properties for the cloud storage service. 
+
+4. Additionally, Pulsar uses multi-part objects to upload the segment data and brokers may crash while uploading the data. 
+
+  It is recommended that you add a life cycle rule for your bucket to expire incomplete multi-part upload after a day or two days to avoid getting charged for incomplete uploads. 
+
+5. Moreover, you can trigger the offloading operation manually (via REST API or CLI) or automatically (via CLI).
+
+6. After transferring ledgers to long-term storage, the messages within these ledgers remain accessible to Pulsar consumers and readers, ensuring transparency in data retrieval.
+
+For more information about tiered storage for Pulsar topics, see [PIP-17](https://github.com/apache/pulsar/wiki/PIP-17:-Tiered-storage-for-Pulsar-topics) and [offload metrics](reference-metrics.md#offload-metrics).
+
+## Read performance for object storage
+
+The jclouds offloader caches entry offsets discovered while reading through an offloaded block. Later reads can reuse a nearby cached offset instead of scanning again from the block's sparse index marker. The broker JVM property `pulsar.jclouds.readhandleimpl.offsetprobe.max` limits the backward search to 1,024 entries by default; `0` disables that backward search while retaining exact-offset cache lookups. If no usable cached offset is found, reading falls back to the sparse index. This setting applies to the jclouds offloader, not the filesystem offloader, and requires a broker restart to change. Evaluate changes with your backlog access pattern before tuning it.
+
+A seek by timestamp, a cursor reset to a timestamp, and message TTL checks locate a position with a binary search that reads one entry per step. The sparse index of a ledger offloaded with the jclouds offloader records only the first entry of each data block (`managedLedgerOffloadMaxBlockSizeInBytes`, default **64 MiB**), so reading any other entry scans from the nearest known offset in ranged reads of `managedLedgerOffloadReadBufferSizeInBytes` (default **1 MiB**), and each ranged read is a request to the object store. In Pulsar **5.0.0 and later**, the search reads the first entry of a data block instead of the exact midpoint of its range when that entry is close to the midpoint, because it takes a single ranged read. The position found is unchanged as long as entry timestamps increase with entry order.
+
+While skipping more than one entry to reach an entry, the jclouds offloader also remembers entry offsets that are at least `pulsar.jclouds.readhandleimpl.learnedoffset.interval.bytes` apart (default **1,048,576 bytes**, or **1 MiB**; minimum 64 KiB). Later reads in the same data block resume from the nearest remembered offset, unless the backward search described above finds a closer cached offset. `0` or a negative value disables remembering offsets. Sequential reads that continue from a cached offset don't add any. Each open offloaded ledger retains at most one remembered offset per interval of its object size, plus one, until its read handle is closed, which happens after `managedLedgerInactiveOffloadedLedgerEvictionTimeSeconds` (default 600) without reads. This is also a broker JVM property that applies to the jclouds offloader, not the filesystem offloader, and requires a broker restart to change.
+
+Inspect the [message position search metrics](reference-metrics-opentelemetry.md#message-position-search-metrics) and the [offload metrics](reference-metrics.md#offload-metrics) to see how long these searches take and how much they read from tiered storage. A larger read buffer scans a data block in fewer, larger requests and retains more memory for each open offloaded ledger. A smaller block size makes the index denser, cannot be lower than 5 MiB, and applies only to ledgers offloaded after the change. Measure seek latency against your object store before changing either setting.

@@ -1,0 +1,729 @@
+# tail
+
+![](../.gitbook/assets/tail.png)
+
+The `in_tail` Input plugin allows Fluentd to read events from the tail of text files. Its behavior is similar to the `tail -F` command.
+
+It is included in Fluentd's core.
+
+## Example Configuration
+
+```text
+<source>
+  @type tail
+  path /var/log/httpd-access.log
+  pos_file /var/log/fluent/httpd-access.log.pos
+  tag apache.access
+  <parse>
+    @type apache2
+  </parse>
+</source>
+```
+
+Refer to the [Configuration File](../configuration/config-file.md) article for the basic structure and syntax of the configuration file.
+
+For `<parse>`, see [Parse Section](../configuration/parse-section.md).
+
+### How It Works
+
+When Fluentd is first configured with `in_tail`, it will start reading from the **tail** of that log, not the beginning. Once the log is rotated, Fluentd starts reading the new file from the beginning. It keeps track of the current inode number.
+
+If `td-agent` restarts, it resumes reading from the last position before the restart. This position is recorded in the position file specified by the `pos_file` parameter.
+
+### Linux Capability
+
+Since v1.12.0, `in_tail` handles the following Linux capabilities if Fluentd's Linux capability handling module is enabled:
+
+* `CAP_DAC_READ_SEARCH` \(`:dac_read_search` on `in_tail` code.\)
+* `CAP_DAC_OVERRIDE` \(`:dac_override` on `in_tail` code.\)
+
+## Plugin Helpers
+
+* [`timer`](../plugin-helper-overview/api-plugin-helper-timer.md)
+* [`event_loop`](../plugin-helper-overview/api-plugin-helper-event_loop.md)
+* [`parser`](../plugin-helper-overview/api-plugin-helper-parser.md)
+* [`compat_parameters`](../plugin-helper-overview/api-plugin-helper-compat_parameters.md)
+
+See also: [Linux capability](../deployment/linux-capability.md)
+
+## Parameters
+
+See [Common Parameters](../configuration/plugin-common-parameters.md).
+
+### `@type` \(required\)
+
+The value must be `tail`.
+
+### `tag`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| string | required parameter | 0.14.0 |
+
+The tag of the event.
+
+`*` can be used as a placeholder that expands to the actual file path, replacing `'/'` with `'.'`.
+
+With the following configuration:
+
+```text
+path /path/to/file
+tag foo.*
+```
+
+`in_tail` emits the parsed events with the `foo.path.to.file` tag.
+
+### `path`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| string | required parameter | 0.14.0 |
+
+The path\(s\) to read. Multiple paths can be specified, separated by comma `','`.
+
+`*` and `strftime` format can be included to add/remove the watch file dynamically. At the interval of `refresh_interval`, Fluentd refreshes the list of watch files.
+
+To discover new files sooner, you can also enable [`enable_dir_watcher`](#enable_dir_watcher).
+
+```text
+path /path/to/%Y/%m/%d/*
+```
+
+For multiple paths:
+
+```text
+path /path/to/a/*,/path/to/b/c.log
+```
+
+If the date is `20140401`, Fluentd starts to watch the files in `/path/to/2014/04/01` directory. See also `read_from_head` parameter.
+
+Using `**` for path globbing is supported.
+
+```text
+path /path/to/**/some.log
+```
+
+By default, You should not use `*` with log rotation because it may cause the log duplication. To avoid log duplication, you need to set `follow_inodes true` in the configuration.
+
+If you want to use other glob patterns such as `[]` and `?`, you need to set up `glob_policy extended` as described in the `glob_policy` section.
+
+### `path_timezone`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| string | nil | 1.8.1 |
+
+This parameter is for `strftime` formatted path like `/path/to/%Y/%m/%d/`.
+
+`in_tail` uses system timezone by default. This parameter overrides it:
+
+```text
+path_timezone "+00"
+```
+
+For timezone format, see [Timezone Section](../configuration/format-section.md#time-parameters).
+
+### `path_delimiter`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| string | `,` | 1.9.1 |
+
+The delimiter used to split the `path` parameter into multiple paths.
+
+Specify another character if your paths contain `,`:
+
+```text
+path /path/to/2014,04,01.log|/path/to/b.log
+path_delimiter |
+```
+
+`/`, `*` and `%` cannot be used because they are reserved for path patterns.
+
+This parameter does not apply to `exclude_path`, which is always separated by `,`.
+
+To use `glob_policy always`, this parameter must be changed from its default. See the `glob_policy` section.
+
+### `glob_policy`
+
+| type | default | available values | version |
+| :--- | :--- | :--- |:--- |
+| enum | backward\_compatible | backward\_compatible/extended/always | 1.17.0 |
+
+This parameter permits to extend glob patterns on `path` and `exclude_path` parameters.
+When specifying `extended`, users can use `[]` and `?` in glob patterns.
+When specifying `always`, users can use `[]`, `?`, and additionally `{}` in glob patterns.
+
+However, `always` option is not able to use with the default value of `path_delimiter`.
+When using the default value of `path_delimiter`, it will be marked as `Fluent::ConfigError`.
+
+### `exclude_path`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| array | `[]` \(empty\) | 0.14.0 |
+
+The paths excluded from the watcher list.
+
+For example, to remove the compressed files, you can use the following pattern:
+
+```text
+path /path/to/*
+exclude_path ["/path/to/*.gz", "/path/to/*.zip"]
+```
+
+`exclude_path` takes input as an array, unlike `path` which takes as a string.
+
+### `follow_inodes`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | false | 1.12.0 |
+
+Avoid to read rotated files duplicately. You should set `true` when you use `*` or  `strftime` format in `path`.
+
+```text
+path /path/to/*
+read_from_head true
+follow_inodes true  # Without this parameter, file rotation causes log duplication.
+```
+
+### `refresh_interval`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| time | 60 \(seconds\) | 0.14.0 |
+
+The interval to refresh the list of watch files. This is used when the path includes `*`.
+
+Periodic refreshes continue when [`enable_dir_watcher`](#enable_dir_watcher) is enabled. They remain the fallback for directories that are not currently watched and changes that directory watchers do not detect.
+
+### `limit_recently_modified`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| time | nil \(disabled\) | 0.14.13 |
+
+Limits the watching files that the modification time is within the specified time range when using `*` in `path`.
+
+### `skip_refresh_on_startup`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | false | 0.14.13 |
+
+Skips the refresh of the watch list on startup. This reduces the startup time when `*` is used in `path`.
+
+### `read_from_head`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | false | 0.14.0 |
+
+Starts to read the logs from the head of the file or the last read position recorded in `pos_file`, not tail.
+
+Notes:
+
+* `in_tail` tries to read a file during the startup phase when this is `true`. So that if the target file is too large and takes a long time to read it, other plugins are blocked to start until the reading is finished. You can avoid it by `skip_refresh_on_startup`.
+* **For Fluentd <= v1.14.2**: If you use `*` or `strftime` format as `path` and new files may be added into such paths while tailing, you should set this parameter to `true`. Otherwise some logs in newly added files may be lost. On the other hand you should guarantee that the log rotation will not occur in `*` directory in that case to avoid log duplication. Or you can use `follow_inodes true` to avoid such log duplication, which is available as of v1.12.0.
+  * From Fluentd v1.14.3, `in_tail` reads newly added files from head automatically even if `read_from_head` is `false`. `read_from_head false` is affected only on start up.
+
+### `encoding`, `from_encoding`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| string | nil \(string encoding is `ASCII-8BIT`\) | 0.14.0 |
+
+Specifies the encoding of reading lines.
+
+By default, `in_tail` emits string value as ASCII-8BIT encoding.
+
+These options change it:
+
+* If `encoding` is specified, `in_tail` changes string to `encoding`.
+
+  This uses Ruby's [`String#force_encoding`](https://docs.ruby-lang.org/en/trunk/String.html#method-i-force_encoding).
+
+* If `encoding` and `from_encoding` both are specified, `in_tail` tries to
+
+  encode string from `from_encoding` to `encoding`. This uses Ruby's
+
+  [`String#encode`](https://docs.ruby-lang.org/en/trunk/String.html#method-i-encode).
+
+You can get the list of supported encodings with this command:
+
+```text
+$ ruby -e 'p Encoding.name_list.sort'
+```
+
+{% hint style='danger' %}
+Caution: From v0.14.12 to v1.18.x, there was a bug.
+
+* You need to specify both `encoding` and `from_encoding`.
+* If you specify only `encoding`, `String#encode` will be executed unintentionally. **It can break the data.**
+* To change only the encoding info as metadata, without transforming the string data itself (`String#force_encoding`), you need to specify the same encoding for both `encoding` and `from_encoding`.
+{% endhint %}
+
+### `read_lines_limit`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| integer | 1000 | 0.14.0 |
+
+The number of lines to read with each I/O operation.
+
+If you see `chunk bytes limit exceeds for an emitted event stream` or similar log with `in_tail`, set a smaller value.
+
+### `read_bytes_limit_per_second`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| size | -1 \(unlimited\) | 1.13.0 |
+
+The number of reading bytes per second to read with I/O operation.
+
+This value should be equal or greater than 8192.
+
+If you work with a big cluster with high volume of log, you can use this parameter to avoid network saturation and make it easier to calculate the max throughput per node. To restrict shipping log volumes per second, set a positive number.
+
+### `num_threads`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| integer | 1 | 1.20.0 |
+
+Controls how `in_tail` parses log lines. The default, `1`, parses lines on the event loop. Set this to `2` or more to parse them on worker threads.
+
+This can reduce delays in processing other files while a large or fast-growing file is parsed. If all worker threads are busy, other files may still experience processing delays. This option does not guarantee an upper bound on latency, and it does not guarantee a higher overall throughput.
+
+```text
+<source>
+  @type tail
+  path /var/log/app/*.log
+  pos_file /var/log/fluentd/app.log.pos
+  tag app
+  num_threads 2
+  <parse>
+    @type json
+  </parse>
+</source>
+```
+
+Worker parsing is enabled only when all of the following conditions are met. Otherwise, `in_tail` logs `in_tail worker parsing is unavailable; using synchronous parsing` at startup and parses lines on the event loop.
+
+* The `<parse>` type is one of `none`, `regexp`, `json`, `csv`, `tsv`, `ltsv`, `msgpack`, `apache`, `apache2`, `apache_error`, `nginx` and `syslog`.
+* The parser is not a multiline parser.
+* `open_on_every_update` is `false`.
+* The internal hooks of `in_tail`, such as `receive_lines`, are not overridden.
+* The configured parser instance has not been replaced by a subclass.
+
+A plugin that inherits from `in_tail` keeps worker parsing as long as it leaves these hooks and the parser instance unchanged.
+
+With worker parsing, `in_tail` reads lines on the event loop and groups them into batches for parsing (see [`read_lines_limit`](#readlineslimit)). A worker thread parses each batch with its own parser instance. The events are emitted and the position file is updated on the event loop after the batch has been parsed. At most one batch per file is in flight at a time, so the order of the events within a file is preserved.
+
+The worker threads accept a limited amount of work. Up to `num_threads * 2` batches can be in flight at a time, counting the batches being parsed and the ones whose events are not emitted yet. Each batch is accounted for at three times the total byte size of its lines. Regular batches share a 64 MiB budget. One additional batch exceeding this budget can be accepted, subject to the same batch-count limit. When a batch is not accepted, its file waits until another batch completes. No lines are skipped.
+
+Lines that the parser cannot parse, such as a malformed JSON line, are handled in the same way as on the event loop (see [`emit_unmatched_lines`](#emitunmatchedlines)). If a worker thread raises an error while processing a batch, the batch is parsed again on the event loop.
+
+At shutdown, `in_tail` waits for the batches that are still in flight and applies the results that complete in time. The position of an unfinished batch is not advanced. Its lines can be read again on restart if the position is persisted with `pos_file` and the file remains available for tailing.
+
+While worker parsing is active, `in_monitor_agent` reports `worker_pending_batch_count`, `worker_pending_bytes` and `worker_parse_error_count` for the plugin.
+
+### `max_line_size`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| size | nil | 1.14.4 |
+
+The maximum length of a line. Longer lines than it will be just skipped.
+
+If you see `BufferChunkOverflowError` exception frequently, it means that incoming data is too long.
+If such a long line is unexpected incoming data and want to ignore it, then set a smaller value than `chunk_limit_size` in `<buffer>` section.
+
+### `multiline_flush_interval`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| time | nil \(disabled\) | 0.14.0 |
+
+The interval of flushing the buffer for multiline format.
+
+If you set `multiline_flush_interval 5s`, `in_tail` flushes buffered event after 5 seconds from last emit. This option is useful when you use `format_firstline` option.
+
+### `pos_file` \(highly recommended\)
+
+| type | default | version |
+| :--- | :--- | :--- |
+| string | nil | 0.14.0 |
+
+Fluentd will record the position it last read from this file:
+
+```text
+pos_file /var/log/fluent/tmp/access.log.pos
+```
+
+`pos_file` handles multiple positions in one file so no need to have multiple `pos_file` parameters per `source`.
+
+Don't share `pos_file` between `in_tail` configurations. It causes unexpected behavior e.g. corrupt `pos_file` content.
+
+`in_tail` removes the untracked file position at startup.
+It means that the content of `pos_file` keeps growing until a restart when you tail
+lots of files with the dynamic path setting.
+This issue can be solved by using `pos_file_compaction_interval`.
+
+### `pos_file_compaction_interval`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| time | nil | 1.9.2 |
+
+The interval of doing compaction of pos file.
+
+The targets of compaction are unwatched, unparsable, and the duplicated line. You can use this value when `pos_file` option is set:
+
+```text
+pos_file /var/log/fluent/tmp/access.log.pos
+pos_file_compaction_interval 72h
+```
+
+### `<parse>` Directive \(required\)
+
+The format of the log.
+
+`in_tail` uses the parser plugin to parse the log. See [`parser`](../parser/) for more detail.
+
+Examples:
+
+```text
+# json
+<parse>
+  @type json
+</parse>
+
+# regexp
+<parse>
+  @type regexp
+  expression ^(?<name>[^ ]*) (?<user>[^ ]*) (?<age>\d*)$
+</parse>
+```
+
+If `@type` contains `multiline`, `in_tail` works in multiline mode.
+
+### `format`
+
+Deprecated parameter. Use `<parse>` instead.
+
+### `path_key`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| string | nil \(no assign\) | 0.14.0 |
+
+Adds the watching file path to the `path_key` field.
+
+With this configuration:
+
+```text
+path /path/to/access.log
+path_key tailed_path
+```
+
+The generated events are like this:
+
+```text
+{"tailed_path":"/path/to/access.log","k1":"v1",...,"kN":"vN"}
+```
+
+### `rotate_wait`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| time | 5 \(seconds\) | 0.14.0 |
+
+`in_tail` actually does a bit more than `tail -F` itself. When rotating a file, some data may still need to be written to the old file as opposed to the new one.
+
+`in_tail` takes care of this by keeping a reference to the old file \(even after it has been rotated\) for some time before transitioning completely to the new file. This helps prevent data designated for the old file from getting lost. By default, this time interval is 5 seconds.
+
+The `rotate_wait` parameter accepts a single integer representing the number of seconds you want this time interval to be.
+
+### `enable_watch_timer`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | true | 0.14.0 |
+
+Enables the additional watch timer. Setting this parameter to `false` will significantly reduce CPU and I/O consumption when tailing a large number of files on systems with `inotify` support. The default is `true` which results in an additional 1 second timer being used.
+
+`in_tail` \(via `Cool.io`\) uses `inotify` on systems which support it. Earlier versions of `libev` on some platforms \(e.g. macOS\) did not work properly; therefore, an explicit 1 second timer was used. Even on systems with `inotify` support, this results in additional I/O each second, for every file being tailed.
+
+Early testing demonstrates that modern `Cool.io` and `in_tail` work properly without the additional watch timer. In the future, depending on the feedback and testing, the additional watch timer may be disabled by default.
+
+### `enable_stat_watcher`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | true | 1.0.1 |
+
+Enables stat watchers for individual files, using `inotify` where available. Setting this parameter to `false` uses only the timer watcher for file tailing; `enable_watch_timer` must remain `true`.
+
+This option is mainly for avoiding the stuck issue with `inotify`.
+
+This setting does not control directory watchers. If you disable it to avoid `inotify`, also leave [`enable_dir_watcher`](#enable_dir_watcher) disabled.
+
+### `enable_dir_watcher`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | false | 1.20.0 |
+
+Watches directories derived from `path` to discover new files without waiting for the next `refresh_interval`. Unlike file watchers, which detect changes to files already being tailed, directory watchers request a refresh of the file list when directories change.
+
+```text
+<source>
+  @type tail
+  path /var/log/myapp/*.log
+  pos_file /var/log/fluent/myapp.pos
+  tag myapp
+  enable_dir_watcher true
+  follow_inodes true
+  <parse>
+    @type none
+  </parse>
+</source>
+```
+
+Related directory changes are collected for one second before refreshing the file list. Further events do not extend that pending timer. This avoids a separate refresh for every event; it does not guarantee discovery within one second. Detection depends on the platform and file system, and some changes may be missed. Periodic refreshes remain enabled as a fallback.
+
+Directory watchers use `Cool.io` stat watchers backed by `libev`, with `inotify` on Linux where available and stat polling as a fallback. They are independent of `enable_stat_watcher` and may use `inotify` even when file stat watchers are disabled. That combination is supported and produces an informational configuration message. If you are avoiding `inotify` because of watch limits or file system issues, leave this option disabled too.
+
+Directory watching adds overhead even when no new files are created. On Linux, modifications to existing files in watched directories can cause internal event processing and metadata checks without triggering a file-list refresh. Each refresh also explores directory candidates in addition to the usual file discovery. Prefer narrowly scoped paths, especially with recursive `**` patterns.
+
+Faster discovery can also find rotated files matching `path` sooner. Use `follow_inodes true` to avoid duplicate collection after rename-based rotation. This does not prevent rereading a copytruncate archive, which has a different inode; keep such archives outside the matching paths or use `exclude_path`.
+
+### `dir_watcher_limit`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| integer | 100 | 1.20.0 |
+
+The maximum number of directories watched at once when `enable_dir_watcher` is enabled. Must be greater than zero.
+
+If there are more candidate directories than this limit, `in_tail` rotates the watched subset at each periodic refresh. Files in unwatched directories are still discovered by periodic refreshes, but may not be found sooner through directory events. A warning is logged when the candidate count exceeds the limit; continued overflow is logged at debug level.
+
+This limit bounds active directory watchers, not directory exploration or the separate watchers for individual files. Raising it may increase OS watch usage. Lowering it does not avoid the cost of exploring a broad recursive path.
+
+For brace patterns enabled by `glob_policy always`, only the first 100 expanded alternatives per configured path are considered for directory watching, independently of this setting. A warning is logged when expansion is truncated. Other alternatives remain covered by periodic file discovery.
+
+### `open_on_every_update`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | false | 0.14.12 |
+
+Opens and closes the file on every update instead of leaving it open until it gets rotated.
+
+### `emit_unmatched_lines`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | false | 0.14.12 |
+
+Emits unmatched lines when `<parse>` format is not matched for incoming logs.
+
+Emitted record is `{"unmatched_line" : incoming line}`, e.g. `{"unmatched_line" : "Non JSON format!"}`.
+
+### `ignore_repeated_permission_error`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| bool | false | 0.14.0 |
+
+If you have to exclude the non-permission files from the watch list, set this parameter to `true`. It suppresses the repeated permission error logs.
+
+#### `@log_level`
+
+The `@log_level` option allows the user to set different levels of logging for each plugin. The supported log levels are: `fatal`, `error`, `warn`, `info`, `debug`, and `trace`.
+
+Refer to the [Logging](../deployment/logging.md) for more details.
+
+
+### `<group>` Section
+
+The `in_tail` plugin can assign each log file to a group, based on user defined rules. The `limit` parameter controls the total number of lines collected for a group within a `rate_period` time interval.
+
+Example:
+
+```text
+# group rules -- 1
+<group>
+  rate_period 5s
+
+  <rule>
+    match {
+        "namespace": "/shopping/",
+        "podname": "/frontend/",
+    }
+    limit 1000
+  </rule>
+</group>
+
+# group rules -- 2
+<group>
+  <rule>
+    match {
+        directory: /payment/
+    }
+    limit 2000
+  </rule>
+</group>
+```
+
+#### `pattern`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| regexp | `/^\/var\/log\/containers\/(?<podname>[a-z0-9]([-a-z0-9]*[a-z0-9])?(\/[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)_(?<namespace>[^_]+)_(?<container>.+)-(?<docker_id>[a-z0-9]{64})\.log$/`| 1.15 |
+
+Specifies the regular expression for extracting metadata (namespace, podname) from log file path. Default value of the pattern regexp extracts information about `namespace`, `podname`, `docker_id`, `container` of the log (K8s specific).
+
+You can also add custom named captures in `pattern` for custom grouping of log files. For example,
+```text
+    pattern /^\/home\/logs\/(?<file>.+)\.log$/
+```
+In this example, filename will be extracted and used to form groups.
+
+#### `rate_period`
+
+| type | default | version |
+| :--- | :--- | :--- |
+| time | 5 \(seconds\) | 1.15.0 |
+
+Time period in which the group line limit is applied. `in_tail` resets the counter after every `rate_period` interval.
+
+#### `<rule>` Section \(required\)
+
+Grouping rules for log files.
+
+##### match
+
+| type | default | version |
+| :--- | :--- | :--- |
+| hash | {"namespace": "/./", "podname": "/./"} | 1.15 |
+
+`match` parameter is used to check if a file belongs to a particular group based on hash keys (named captures from `pattern`) and hash values (regexp in string)
+
+##### limit
+
+| type | default | version |
+| :--- | :--- | :--- |
+| integer | -1 | 1.15 |
+
+Maximum number of lines allowed from a group in `rate_period` time interval. The default value of `-1` doesn't throttle log files of that group.
+
+## Learn More
+
+* [Input Plugin Overview](./)
+
+## FAQ
+
+### What happens when `<parse>` type is not matched for logs?
+
+`in_tail` prints warning message. For example, if you specify `@type json` in `<parse>` and your log line is `123,456,str,true`, then you will see following message in fluentd logs:
+
+```text
+2018-04-19 02:23:44 +0900 [warn]: #0 pattern not match: "123,456,str,true"
+```
+
+See also `emit_unmatched_lines` parameter.
+
+### What does the `got incomplete line before first line` warning mean?
+
+This warning appears only when you use a multiline parser (a `<parse>` section with `@type multiline` and `format_firstline`). In multiline mode, `in_tail` starts buffering a record from the line that matches `format_firstline` and appends the following lines to it. If `in_tail` reads a continuation line before it has ever matched a first line, the line cannot be assembled into a complete event, so `in_tail` discards it and prints a warning like this for each such line:
+
+```text
+2023-01-01 00:00:00 +0900 [warn]: #0 got incomplete line before first line from /path/to/file: "    at Foo.bar(Foo.java:42)\n"
+```
+
+The common causes are:
+
+* Reading starts in the middle of a record, for example right after a log rotation, or on startup when `read_from_head` is `false`. In this case the warning is temporary and harmless: only the incomplete head of the record at the starting position is skipped, and the subsequent complete records are processed normally.
+* `format_firstline` does not match the actual first line of your records. Then no line ever becomes the start of a record, so the warning keeps appearing. Review the pattern.
+* If a single `<parse>` section is applied to files with different formats (for example, a `path` glob matches multiple file types), warnings will continue to be emitted for files that do not match `format_firstline`. Use a separate in_tail source for each format instead.
+
+**Note:** these lines are dropped. Because `emit_unmatched_lines` is `false` by default, the warning is the only sign that the data is being lost. Set `emit_unmatched_lines true` to emit them instead; each line is then emitted as `{"unmatched_line" : incoming line}`.
+
+See the [multiline parser](../parser/multiline.md) for the parser configuration.
+
+### `in_tail` doesn't start to read the log file, why?
+
+`in_tail` follows `tail -F` command's behavior by default, so `in_tail` reads only the new logs. If you want to read the existing lines for the batch use case, set `read_from_head true`.
+
+### `in_tail` shows `/path/to/file unreadable` log message. Why?
+
+If you see this message:
+
+> `/path/to/file` unreadable. It is excluded and would be examined next time.
+
+It means that `fluentd` does not have read permission for `/path/to/file`. Check your fluentd and target files permission.
+
+**Note**: When `td-agent` is launched by systemd, the default user of the `td-agent` process is the `td-agent` user.
+You must ensure that this user has read permission to the tailed `/path/to/file`. For instance, on Ubuntu,
+the default Nginx access file `/var/log/nginx/access.log` is mode `0640` and owned by `www-data:adm`. In
+this case, several options are available to allow read access:
+
+1. Add the `td-agent` user to the `adm` group, e.g. through `usermod -aG`, or
+2. Use the [`cap_dac_read_search` capability](../deployment/linux-capability.md#capability-handling-on-intail)
+   to allow the invoking user to read the file without otherwise changing its permission bits or ownership.
+
+A bug exists in Fluentd 1.13.x where it may suppress warning logs about unreadable files. (See Fluentd PR [#3478](https://github.com/fluent/fluentd/pull/3478).)
+
+### `logrotate` Setting
+
+`logrotate` has the `nocreate` parameter and it does not create a new file if log rotation is triggered. It means `in_tail` cannot find the new file to tail.
+
+This parameter does not fit the typical application log use cases, so check your `logrotate` setting which does not include the `nocreate` parameter.
+
+### What happens when `in_tail` receives `BufferOverflowError`?
+
+`in_tail` stops reading the new lines and pos file updates until `BufferOverflowError` is resolved. After resolving `BufferOverflowError`, resume emitting new lines and pos file updates.
+
+### `in_tail` is sometimes stopped when monitoring lots of files. How to avoid it?
+
+Try to set `enable_stat_watcher false` in `in_tail` setting. We got several reports that `in_tail` is stopped when `*` is included in `path`, and the problem is resolved by disabling the `inotify` events.
+
+If you have enabled `enable_dir_watcher`, disable it too when trying to avoid `inotify`: directory watchers can use it independently of `enable_stat_watcher`.
+
+### Wildcard pattern in `path` does not work on Windows, why?
+
+The backslash \(`\`\) with `*` does not work on Windows by internal limitations. To avoid this, use slash style instead:
+
+```text
+# good
+path C:/path/to/*/foo.log
+
+# bad
+path C:\\path\\to\\*\\foo.log
+```
+
+### What happens when a file can be assigned to more than one group?
+
+Example,
+
+```text
+  <rule> ## Rule1
+    match {
+      namespace: /monitoring/
+    }
+    limit 100
+  </rule>
+
+  <rule> ## Rule2
+    match {
+      namespace: /monitoring/,
+      podname: /logger/,
+    }
+    limit 2000
+  </rule>
+```
+
+In this case, rules with more constraints, i.e., greater number of `match` hash keys will be given a higher priority. So a file will be assigned to `Rule2` if it can be assigned to both `Rule1` and `Rule2`.

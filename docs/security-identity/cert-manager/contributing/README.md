@@ -1,0 +1,88 @@
+---
+title: Contributing
+description: 'cert-manager contributing guide: Get involved!'
+---
+
+## Great to See You!
+
+Whether you're a previous contributor or a first timer looking to get involved, we love
+it when the community comes together to improve the project!
+
+In this "contributing" section we document processes we follow as a project, and include
+some details on how to build, test and run cert-manager for development purposes.
+
+## Meetings
+
+All cert-manager meetings are open to everyone; whether you have a question, a
+suggestion, or just want to chat, you're welcome to join. Register using the
+links below to receive an invitation:
+
+|          Meeting Name          |                           Description                            |                   When                    | Link to register |
+|--------------------------------|------------------------------------------------------------------|-------------------------------------------|------------------|
+| Daily Check-In (EMEA and APAC) | A quick daily stand-up to sync on work and blockers              | About 3 times a week at 10:30 London time | [Register here][standup] |
+| Weekly Community (US and EMEA) | A weekly meeting for the community to discuss progress and plans | Thursdays at 17:00 London time            | [Register here][weekly] |
+
+See all upcoming meetings in your local time on the [calendar page][calendar].
+
+[standup]: https://zoom-lfx.platform.linuxfoundation.org/meeting/96523988484?password=1cb64ed5-3014-48b6-ae72-3d0738ac2263
+[weekly]: https://zoom-lfx.platform.linuxfoundation.org/meeting/97054472053?password=4c61abc4-3fc1-44eb-a02b-c4ce7b0c26c3
+[calendar]: https://zoom-lfx.platform.linuxfoundation.org/meetings/cert-manager
+
+:::info
+
+🔰 All of our meetings happen on London (UK) time; you can add London to the world clocks on your phone to avoid confusion!
+
+When daylight savings time changes in London might be different to when it changes for you if you live in a place that either
+doesn't have DST or which changes on a different schedule like North America or Australia!
+
+:::
+
+### Daily Check-In
+
+Our daily check-in meetings [happen on Zoom][standup] at [10\:30 London time](http://www.thetimezoneconverter.com/?t=10:30&tz=Europe/London). The exact days for which the standup is happening can be seen on the [calendar page](https://zoom-lfx.platform.linuxfoundation.org/meetings/cert-manager?view=list) and may change.
+
+The format is a 5 minute social chat, followed by a quick round-robin status report and ending with any longer form talking points.
+
+The status report is a stand-up where we talk about work done yesterday, work coming up and highlight any blockers.
+We'll try to keep to a **strict time limit** during these status reports of around 1 minute per person.
+
+Please don't be offended if someone steps in when you run out of time and moves the reports along to the next person – the idea
+is for everyone to be succinct so it's clear what's being worked on and who is blocked.
+
+We finish with talking points, which are open-ended discussions on any topic related to cert-manager or its sub-projects.
+We'll look to ensure that anyone outside of the core maintainer team who has a talking point goes first.
+
+### Community Meetings
+
+The cert-manager weekly community meeting happens [on Zoom][weekly] at [17\:00 London time](http://www.thetimezoneconverter.com/?t=17:00&tz=Europe/London) on Thursdays.
+
+You can look at the [calendar](https://zoom-lfx.platform.linuxfoundation.org/meetings/cert-manager?view=list) to see when the next one will take place.
+
+These meetings are an hour-long chat about cert-manager topics. It's a great way to get involved with contributing for the
+first time; to get answers to any questions you might have; or to propose a new feature which needs some explanation.
+
+If you want to discuss something, please add it to the [meeting notes](https://docs.google.com/document/d/1Tc5t6ylY9dhXAan1OjOoldeaoys1Yh4Ir710ATfBa5U)
+before the meeting. The meeting chair will try to get to everything that was on the notes before the meeting started.
+
+We record these meetings and put them on YouTube so they can be checked later – if you don't want to appear on video please keep
+your camera off!
+
+{/* Changing this heading will break the reference link at https://cert-manager.io/docs/contributing/#slack, so avoid modifying it. */}
+## Slack
+
+Join our Slack channels to connect with the cert-manager community.
+
+### Step 1: Join Kubernetes Slack
+
+You need to join the [Kubernetes Slack Workspace](https://slack.k8s.io). Click the link to request an invitation if you are not already a member.
+
+### Step 2: Join cert-manager Channels
+
+Once you have access to Kubernetes Slack, you can search for and join the following channels:
+
+- [`#cert-manager`](https://kubernetes.slack.com/messages/cert-manager): A channel for all users of cert-manager; use this for any usage-related questions.
+- [`#cert-manager-dev`](https://kubernetes.slack.com/messages/cert-manager-dev): Dedicated to collaboration between cert-manager contributors and maintainers. Please use this channel for code-related questions only.
+
+## Issues and Pull Requests
+
+If you are looking for help understanding our issue and pull request usage, then please review the [contributing flow](./contributing-flow.md) page.

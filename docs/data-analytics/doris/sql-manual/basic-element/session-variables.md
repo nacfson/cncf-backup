@@ -1,0 +1,365 @@
+---
+{
+    "title": "Session Variable List",
+    "language": "en",
+    "description": "Values, defaults and effects of Doris session variables."
+}
+---
+
+:::caution This page is under construction and is not yet complete
+
+This page collects the session variables of Doris. It currently only covers variables that were
+**added, had their default changed, or were removed** in recent versions; it is not yet a complete
+reference. For a variable that does not appear here, use `SHOW VARIABLES LIKE '<pattern>'` to inspect
+its current value.
+
+For how variables are classified, scoped and set, see [Variables](./variables.md).
+
+:::
+
+## Inspect and set
+
+```sql
+-- Inspect
+SHOW VARIABLES LIKE 'enable_file_scanner_v2';
+
+-- Current session only
+SET enable_file_scanner_v2 = false;
+
+-- Globally (applies to sessions created afterwards)
+SET GLOBAL enable_file_scanner_v2 = false;
+```
+
+## What changed in 4.1.5
+
+| Category | Variables |
+| --- | --- |
+| Added | `enable_hyperscan_fallback` |
+| Default changed | `enable_file_cache`: `false` to `true` |
+| Behavior corrected | `profile_level` is forwarded to the Master FE; `return_object_data_as_binary` distinguishes SQL Cache results |
+
+## What changed in 4.1.4
+
+| Category | Variables |
+| --- | --- |
+| Added | `enable_file_scanner_v2`, `enable_expr_zonemap_filter`, `enable_local_exchange_before_agg`, `enable_local_exchange_before_streaming_agg`, `runtime_filter_broadcast_join_producer_num`, `runtime_filter_tree_publish_max_send_bytes`, `bucket_shuffle_downgrade_ratio`, `eager_aggregation_on_broadcast_join`, `eager_agg_broadcast_row_count`, `force_eager_agg_hint`, `enable_topn_lazy_mat_phase2_no_write_file_cache`, `file_cache_query_limit_bytes`, `file_presigned_url_ttl_seconds`, `force_forward_all_queries` |
+| Semantics changed | `enable_runtime_filter_partition_prune`, `enable_nereids_distribute_planner` |
+| Removed | `eager_aggregation_on_join`, `plan_nereids_dump` |
+
+## External table scan
+
+### `enable_file_cache`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` (`false` before 4.1.5) |
+| Version | Default changed in 4.1.5 |
+
+Whether queries use File Cache. The BE configuration with the same name must also be enabled; enabling only the session variable does not use the cache when the BE setting is `false`. Both defaults changed to `true` in 4.1.5. After upgrading, check explicit settings and persisted global variables. See [File Cache](../../compute-storage-decoupled/file-cache/file-cache.md) for paths, capacity, and limitations.
+
+### `external_scan_consistent_hash_spread_num`
+
+This option is for development builds that support external split spreading. It can spread independently planned queries for the same remote file split across eligible backends, reducing a persistent scan hotspot.
+
+| Item | Value |
+| --- | --- |
+| Type | Integer |
+| Default | `1` |
+| Valid values | `0` through `2147483647` |
+| Scope | Session; `SET GLOBAL` applies to new sessions |
+
+| Value | Behavior |
+| --- | --- |
+| `1` (default) | Preserve the original scheduling strategy, configured candidate counts and global split redistribution. It does **not** limit scans to one backend. |
+| `0` | Enable automatic spreading across all eligible backends in the query's compute group. Use consistent hashing when `enable_file_cache` or `use_consistent_hash_for_external_scan` is enabled; otherwise use the random strategy. |
+| `N > 1` | Spread within at most N distinct consistent-hash candidates, capped by the eligible backend count, when file caching or consistent hashing is enabled. Otherwise preserve round-robin scheduling. |
+
+```sql
+-- Enable automatic spreading for this session, without requiring file cache or hash scheduling.
+SET external_scan_consistent_hash_spread_num = 0;
+
+-- Limit the hash candidate set. This does not require the cluster to have exactly three backends.
+SET use_consistent_hash_for_external_scan = true;
+SET external_scan_consistent_hash_spread_num = 3;
+
+-- Preserve the original scheduling.
+SET external_scan_consistent_hash_spread_num = 1;
+-- Restore the compiled default, also 1.
+UNSET VARIABLE external_scan_consistent_hash_spread_num;
+```
+
+The spread mode selects the candidate with the least scan weight already assigned by this query's policy; ties are broken uniformly at random. Each split is assigned once. It does not select by live backend CPU usage, and does not guarantee a throughput multiplier. File load and schema scans retain their existing behavior.
+
+In spread mode, when optimized local scheduling is enabled, a remotely accessible split prefers a backend matching its host hints only if that backend's assigned scan weight is no greater than the minimum across all eligible backends. Otherwise, the split follows the configured scheduling strategy. This local preference can select a backend outside the remote split's hash candidates. Splits that are not remotely accessible must still use backends matching their required hosts.
+
+Spreading disables subsequent global split redistribution, so assignments remain within the split's eligible candidates and locality constraints. With multiple splits, balancing is limited to each split's candidates and may be less even than the original global redistribution.
+
+This option does not enable file caching. When file caching is enabled, `0` can create cached copies on every eligible backend and increase warmup reads and cache storage; explicit N limits remote hash candidates, subject to locality precedence. It does not pre-create cache replicas. Start with `1`; enable spreading when repeated queries concentrate on a saturated backend and other eligible backends have spare capacity. Compare both modes with the same query, cache state and resources.
+
+Persisted global values are retained on upgrade. Changing the compiled default does not reset a saved global value of `0`; use `SET GLOBAL external_scan_consistent_hash_spread_num = 1` if new sessions should preserve original scheduling. Existing sessions must change their session value separately. Negative, non-integer or out-of-range values are rejected.
+
+### `enable_file_scanner_v2`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` |
+| Version | Added in 4.1.4 |
+
+Whether to use File Scanner V2 to scan external files. When enabled, `FileScanNode` uses the new
+native scan engine for the query scenarios it supports, covering the Parquet, ORC, CSV and JSON
+formats as well as the Hive, Iceberg, Paimon and Hudi table formats. JDBC catalogs and Iceberg system
+tables still use the legacy scan path.
+
+Set it to `false` to compare behavior if you suspect a query issue is related to the new scanner. See
+[Data Lake Query Tuning](../../lakehouse/best-practices/optimization.md).
+
+### `enable_expr_zonemap_filter`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` |
+| Version | Added in 4.1.4 |
+
+Controls expression ZoneMap filtering in the scanners that honor this variable.
+
+File Scanner V2 always performs the safe form of expression ZoneMap filtering and is not affected by
+this variable.
+
+### `enable_runtime_filter_partition_prune`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` |
+| Version | Semantics changed in 4.1.4 |
+
+Controls runtime-filter partition pruning in the scanners that honor this variable.
+
+Since 4.1.4, File Scanner V2 always performs the safe form of partition pruning, so setting this
+variable to `false` has no effect on File Scanner V2.
+
+## Query planning and execution
+
+### `enable_nereids_distribute_planner`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` |
+| Version | Upgrade behavior changed in 4.1.4 |
+
+Whether to use the Nereids distributed planner.
+
+The default in dev is `true`. To disable the distributed planner explicitly, run `SET GLOBAL enable_nereids_distribute_planner = false;` and set the current session separately. Version migration in the 4.1 series differs from dev; do not assume that upgrading always overwrites a saved global setting.
+
+### `runtime_filter_broadcast_join_producer_num`
+
+| Item | Value |
+| --- | --- |
+| Type | Int |
+| Default | `3` |
+| Version | Added in 4.1.4 |
+
+Maximum number of producer BEs for each runtime filter in a broadcast join. A value less than or
+equal to `0` removes the limit.
+
+In a broadcast join every build-side BE produces the same runtime filter content, so bounding the
+number of producers noticeably reduces RPC overhead on large clusters. This only affects the Nereids
+distributed planning path; the legacy Coordinator path keeps its existing behavior.
+
+### `runtime_filter_tree_publish_max_send_bytes`
+
+| Item | Value |
+| --- | --- |
+| Type | Long (bytes) |
+| Default | `268435456` (256 MB) |
+| Version | Added in 4.1.4 |
+
+Maximum number of bytes sent in a single RPC when publishing a global runtime filter. Above this
+threshold Doris switches to tree (multi-level) publishing, so the merge node no longer sends the same
+large filter to every scan node.
+
+A value of `0` disables tree publishing and falls back to direct publishing. The value must be
+greater than or equal to `0`, otherwise setting it fails.
+
+### `bucket_shuffle_downgrade_ratio`
+
+| Item | Value |
+| --- | --- |
+| Type | Double |
+| Default | `0.8` |
+| Version | Added in 4.1.4 (experimental) |
+
+Downgrade a bucket shuffle join to a regular shuffle join when the base table side's total bucket
+count is smaller than the total instance count times this ratio. A value less than or equal to `0`
+never downgrades. The default of `0.8` keeps the original behavior.
+
+### `enable_local_exchange_before_agg`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` |
+| Version | Added in 4.1.4 |
+
+Whether a local exchange is inserted before an aggregation operator.
+
+:::caution
+Turning this off is not recommended. Before 4.1.4, disabling this behavior could return **wrong
+results** with serial or non-hash local exchanges; that issue was fixed in 4.1.4.
+:::
+
+### `enable_local_exchange_before_streaming_agg`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `false` |
+| Version | Added in 4.1.4 |
+
+Whether a local exchange is inserted before a streaming aggregation operator.
+
+### `eager_aggregation_on_broadcast_join`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` |
+| Version | Added in 4.1.4 |
+
+Whether eager aggregation (aggregation push-down) is allowed on a broadcast join.
+
+### `eager_agg_broadcast_row_count`
+
+| Item | Value |
+| --- | --- |
+| Type | Int |
+| Default | `250000` |
+| Version | Added in 4.1.4 |
+
+Row-count threshold used to decide whether to apply eager aggregation on a broadcast join.
+
+### `force_eager_agg_hint`
+
+| Item | Value |
+| --- | --- |
+| Type | String |
+| Default | `""` (empty) |
+| Version | Added in 4.1.4 |
+
+A matching hint that forces eager aggregation push-down, intended for testing and debugging.
+**Not recommended in production.**
+
+The format is `<func>:<qualifier.column | *>=<push|nopush>`, with entries separated by `;`:
+
+```sql
+SET force_eager_agg_hint = 'sum:t1.a=push; sum:t2.a=nopush; count:*=push';
+```
+
+Note that entries are matched per aggregate function, but the effect applies to the current candidate
+push-down branch or subtree rather than to one aggregate function independently. If any matched entry
+in a branch is `nopush`, that branch is not pushed down; otherwise, if any matched entry is `push`,
+that branch may be forced down, and the other aggregates in the same branch follow that branch-level
+decision.
+
+### `force_forward_all_queries`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `false` |
+| Version | Added in 4.1.4 |
+
+When enabled, every query in the current session is forwarded to the master FE. This is useful when
+diagnosing problems caused by metadata inconsistency between the master and follower FEs. The
+variable is the session-level counterpart of the FE configuration item of the same name.
+
+## Cache
+
+### `file_cache_query_limit_bytes`
+
+| Item | Value |
+| --- | --- |
+| Type | Long (bytes) |
+| Default | `-1` |
+| Version | Added in 4.1.4 |
+
+Maximum number of remote scan bytes a single query may write to the file cache through read-through
+on each BE:
+
+- less than `0`: no limit (feature disabled);
+- equal to `0`: the query never writes to the file cache;
+- greater than `0`: the query stops writing to the file cache once its cumulative remote scan volume
+  reaches this threshold.
+
+Use it to prevent a one-off large scan from evicting hot data from the cache.
+
+### `enable_topn_lazy_mat_phase2_no_write_file_cache`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `false` |
+| Version | Added in 4.1.4 |
+
+When enabled, phase-2 reads of TopN lazy materialization go straight to remote storage on a file
+cache miss and **do not write the missed range back to the file cache**. This helps when the phase-2
+read pattern is random and the cache hit rate is low.
+
+## AI functions
+
+### `file_presigned_url_ttl_seconds`
+
+| Item | Value |
+| --- | --- |
+| Type | Long (seconds) |
+| Default | `3600` |
+| Version | Added in 4.1.4 |
+
+Expiration time of the presigned URL generated for an object in S3-compatible storage in multimodal
+`EMBED()` scenarios. Increase it when media files are large and the provider takes longer to fetch
+them. See [EMBED](../sql-functions/ai-functions/distance-functions/embed.md).
+
+## Profile and result output
+
+### `profile_level`
+
+| Item | Value |
+| --- | --- |
+| Type | Integer (`1`, `2`, or `3`) |
+| Default | `2` |
+| Version | Forwarding behavior corrected in 4.1.5 |
+
+Controls Query Profile detail: `1` collects merged counters, `2` prints detailed information, and `3` enables additional counters that may affect performance. Since 4.1.5, queries forwarded to the Master FE retain the current session's level. See [Query Profile](../../query-acceleration/query-profile.md).
+
+### `return_object_data_as_binary`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `false` |
+| Version | SQL Cache distinction corrected in 4.1.5 |
+
+Whether MySQL results return raw binary data for HLL, BITMAP, and QUANTILE_STATE objects. When `false`, these values return NULL. Since 4.1.5, this variable distinguishes SQL result cache entries, preventing sessions with binary output enabled from reusing NULL results cached by sessions with it disabled.
+
+## Regular expressions
+
+### `enable_hyperscan_fallback`
+
+| Item | Value |
+| --- | --- |
+| Type | Boolean |
+| Default | `true` |
+| Version | Added in 4.1.5 |
+
+Whether to fall back to RE2 when Hyperscan cannot compile a pattern. When `true`, Doris tries RE2; when `false`, it returns the Hyperscan compilation error. Falling back does not add syntax that RE2 itself does not support. This variable controls a different path from `enable_extended_regex`, which enables advanced Boost.Regex syntax. See [REGEXP](../sql-functions/scalar-functions/string-functions/regexp.md).
+
+## Removed variables
+
+| Variable | Removed in | Notes |
+| --- | --- | --- |
+| `eager_aggregation_on_join` | 4.1.4 | The aggregation push-down strategy was reworked; use `eager_aggregation_on_broadcast_join` and `eager_agg_broadcast_row_count` instead. Remove the variable from any script that still sets it |
+| `plan_nereids_dump` | 4.1.4 | Now internal state that is only turned on while replaying a minidump; it can no longer be set with `SET` |

@@ -1,0 +1,341 @@
+---
+title: "Video Frames"
+description: "Store complete encoded videos and read their logical frame rows for training."
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Video Frames
+
+Store encoded videos in `.video` and read individual frames for training.
+
+## Import a Video
+
+With Python 3.10 or newer, install `pypaimon[video]`:
+
+```shell
+pip install 'pypaimon[video]'
+```
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+conn = pm.connect(options={"warehouse": "file:///tmp/video_lake"})
+frames = conn.create_table(
+    "auto_frames",
+    schema=pa.schema([
+        pa.field("frame_index", pa.int64()),
+        pa.field("timestamp", pa.float64()),
+        pa.field("episode_id", pa.int64()),
+        pa.field("video", pa.large_binary()),
+    ]),
+    options={"video-frame-field": "video"},
+)
+frames.add_video("/data/example.mp4")
+frames.add_video("oss://source-bucket/episode-42.mp4", metadata={"episode_id": 42})
+# Raw HEVC: explicitly supply a fixed frame rate.
+frames.add_video("oss://source-bucket/episode-42.h265", source_fps=30)
+```
+
+Generates zero-based `frame_index` and `timestamp` in seconds from the first
+frame. `metadata` supplies per-video constants. Containerized videos retain
+original bytes and variable frame timing; require one decodable video stream
+with strictly increasing PTS.
+
+Raw HEVC is remuxed to MP4 without re-encoding. `source_fps` generates fixed-rate
+timestamps, not original capture times. Temporary raw/MP4 files are cleaned up
+after import, including failures. Omit `source_fps` for containerized videos.
+
+Configure remote credentials on the connection and keep the source unchanged
+during import. To supply frame metadata yourself, pass `frames` as shown below.
+
+## Video Frame Storage
+
+For a frame table, set `video-frame-field` to one or more comma-separated
+scalar BLOB columns. Paimon stores frame ordinals in `VideoFrameDescriptor`
+and compact `.video` indexes, so the normal data file does not need a
+`frame_index` or `frame_timestamp` column:
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+frames = conn.create_table(
+    "video_frames",
+    schema=pa.schema([
+        pa.field("episode_id", pa.int64()),
+        pa.field("state", pa.list_(pa.float32())),
+        pa.field("action", pa.list_(pa.float32())),
+        pa.field("video", pa.large_binary()),
+    ]),
+    options={
+        "video-frame-field": "video",
+    },
+)
+```
+
+`add_video` accepts a complete encoded-video source plus the ordinary columns
+for its logical frame rows. `Blob.from_local` is descriptor-backed and streams
+the source; the MP4 is not first loaded into Python memory:
+
+```python
+video = pm.Blob.from_local("/data/episode-42.mp4")
+frames.add_video(video, frame_rows, first_frame=0)
+```
+
+Use `add_videos` to keep one writer and one commit open across several source
+videos. This is the path that lets one `.video` object pack multiple complete
+MP4 payloads and reduces object/manifest count:
+
+```python
+frames.add_videos([
+    (pm.Blob.from_local("/data/episode-42.mp4"), episode_42_rows),
+    (pm.Blob.from_local("/data/episode-43.mp4"), episode_43_rows),
+])
+```
+
+To encode an ordered sequence of image bytes or Pillow images before storing
+it, use Python 3.10 or newer, install the optional video dependencies, and call
+`add_images_as_video`:
+
+```shell
+pip install 'pypaimon[video]'
+```
+
+```python
+frames.add_images_as_video(
+    image_frames,
+    episode_44_rows,
+    fps=30,
+    codec="libx264",
+    pixel_format="yuv420p",
+    gop_size=2,
+    codec_options={"crf": "18", "preset": "fast"},
+)
+```
+
+The image and row counts must match, and every image must have the same
+dimensions. The container is MP4; codec-specific options are passed to PyAV.
+Encoding may be lossy and the original image payloads are not retained. A
+smaller GOP improves random frame access but usually increases file size.
+After encoding, Paimon copies the MP4 bytes into `.video` storage without
+transcoding them again.
+
+Each item may also be `(video, frame_rows, first_frame)`. Frame ordinals are
+generated consecutively from `first_frame`. If application semantics require
+PTS, wall-clock time, or a non-unit sampling map, retain that value in a normal
+column; `.video` version 1 addresses presentation-order frames with stride one.
+
+Remote sources can use an explicit descriptor. Its URI must be readable with
+the table's configured `FileIO` credentials:
+
+```python
+video = pm.BlobDescriptor(
+    "oss://source-bucket/episode-43.mp4",
+    offset=0,
+    length=video_size,
+)
+frames.add_video(video, episode_43_rows)
+```
+
+Readers derive frame locations from ordinary MP4 sample tables and cache them per
+video in each process. Unsupported containers use the decoder's scan path.
+The writer records moov locations while copying video bytes; no separate keyframe
+index is generated.
+
+The writer deduplicates exact payload descriptor identity inside each `.video`
+file. Its video grouping policy coordinates normal, BLOB, and vector rolling
+at payload boundaries. A file may exceed its target before the next boundary.
+The normal `.blob` format is unchanged.
+
+### Add a Video Column
+
+Use `__VIDEO_FRAME_FIELD` to add and automatically register a nullable video
+column. Existing rows read NULL in the new column:
+
+```python
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
+
+conn.catalog.alter_table("default.images", [
+    SchemaChange.add_column("image_video", AtomicType("BYTES"), "__VIDEO_FRAME_FIELD"),
+])
+images = conn.get_table("images")
+```
+
+Existing video fields are preserved automatically.
+
+### Update frame rows and replace a video
+
+Frame rows use the ordinary table update API for non-video columns. This writes
+only the changed data-evolution columns and keeps the existing `.video` object
+and frame descriptors unchanged:
+
+```python
+frames.update(
+    where="episode_id = 42",
+    values={"state": corrected_states},
+)
+```
+
+Writing a complete encoded video uses the specialized API. `replace_video`
+selects the matching logical rows in `_ROW_ID` order, assigns consecutive frame
+ordinals, and writes a video-column delta without rewriting the normal data
+file:
+
+```python
+frames.replace_video(
+    where="episode_id = 42",
+    video=pm.Blob.from_local("/data/episode-42-corrected.mp4"),
+    first_frame=0,
+)
+```
+
+The generic `update()` API rejects assignments to the configured
+`video-frame-field`; use `replace_video()` so Paimon can preserve the complete
+video payload and its embedded row-to-frame mapping.
+
+### Read with PyTorch DataLoader
+
+Install the PyTorch extra, then convert the multimodal scan directly. Unlike a
+regular BLOB materialization, `ScanQuery.to_torch` always returns serialized
+descriptors for BLOB columns. DataLoader workers receive Paimon splits and open
+the selected video ranges themselves:
+
+```shell
+pip install 'pypaimon[torch]'
+```
+
+```python
+from torch.utils.data import DataLoader
+
+dataset = (
+    frames.scan()
+    .select(["episode_id", "state", "action", "video"])
+    .to_torch(streaming=True)
+)
+
+loader = DataLoader(
+    dataset,
+    batch_size=32,
+    num_workers=4,
+    shuffle=False,
+)
+```
+
+The `video` value is serialized `VideoFrameDescriptor` bytes, not repeated MP4
+bytes. `VideoFrameCollator` owns a bounded, process-local LRU cache keyed by the
+physical video range, so different frame descriptors reuse one decoder session
+in each DataLoader worker. `decoder_factory(stream)` opens any codec library;
+`decode_fn(decoder, frame_index, row)` receives the embedded frame ordinal.
+
+```python
+import av
+import torch
+import pypaimon.multimodal as pm
+from torch.utils.data import DataLoader
+
+
+class SequentialPyAvDecoder:
+    def __init__(self, stream):
+        self.container = av.open(stream)
+        self._reset()
+
+    def _reset(self):
+        self.frames = iter(self.container.decode(video=0))
+        self.next_index = 0
+
+    def frame(self, index):
+        if index < self.next_index:
+            self.container.seek(0)
+            self._reset()
+        while self.next_index <= index:
+            frame = next(self.frames)
+            self.next_index += 1
+        array = frame.to_ndarray(format="rgb24")
+        return torch.from_numpy(array).permute(2, 0, 1)
+
+    def close(self):
+        self.container.close()
+
+
+def decode_frame(decoder, frame_index, row):
+    return decoder.frame(frame_index)
+
+
+collator = pm.VideoFrameCollator(
+    frames,
+    video_column="video",
+    decoder_factory=SequentialPyAvDecoder,
+    decode_fn=decode_frame,
+    output_column="frame",
+    max_open_videos=4,
+)
+
+loader = DataLoader(
+    dataset,
+    batch_size=32,
+    num_workers=4,
+    shuffle=False,
+    collate_fn=collator,
+    persistent_workers=True,
+)
+
+for batch in loader:
+    # batch["frame"] is [N, C, H, W].
+    train(batch["frame"], batch["episode_id"])
+```
+
+The example decoder additionally requires `pip install av`; PyAV is not a
+PyPaimon dependency.
+
+Define the decoder class and function at module scope when DataLoader uses the
+`spawn` multiprocessing method. For sequential video decoding, keep
+`shuffle=False`; row-buffer shuffle can turn monotonic frame access into seeks
+and require more open decoder sessions. Paimon's worker sharding is split-level,
+so it does not duplicate a split across workers.
+
+### Read video training windows
+
+`ContiguousWindowDataset` decodes `video-frame-field` columns directly. It
+keeps descriptors through row selection, groups overlapping requests by
+physical video, and decodes each selected row once before assembling windows:
+
+```python
+video_windows = frames.scan().to_contiguous_window_dataset(
+    columns=["state", "video", "action"],
+    frame_offsets={"video": [-2, -1, 0], "action": list(range(16))},
+    group_key="episode_id",
+    order_key="frame_index",
+    boundary="pad",
+    column_transforms={"video": torch.stack},
+    video_backend="pyav",
+)
+
+loader = DataLoader(video_windows, batch_size=32, num_workers=4)
+for batch in loader:
+    # video is [N, T, C, H, W].
+    train(batch["video"], batch["state"], batch["action"])
+```
+
+Install `pypaimon[torch,video]` for the PyAV path, or install TorchCodec
+separately. Omit `video_backend` to select an available decoder. The decoder
+and range cache stay local to each DataLoader worker.

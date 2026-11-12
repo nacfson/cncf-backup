@@ -1,0 +1,497 @@
+---
+title: CyberArk Certificate Manager
+description: 'cert-manager configuration: CyberArk Issuers'
+---
+
+## Introduction
+
+The CyberArk `Issuer` obtains certificates from [CyberArk Certificate
+Manager](https://www.cyberark.com/products/certificate-manager/) SaaS or
+Self-Hosted, or from [Palo Alto Networks Next-Generation Trust Security
+(NGTS)][ngts].
+
+The `Issuer` was formerly known as the Venafi `Issuer`, and for backwards compatibility reasons is configured using older product names - "Venafi Cloud" corresponds to CyberArk Certificate Manager SaaS and "Venafi TPP" corresponds to CyberArk Certificate Manager Self-Hosted.
+
+You can have multiple different `Issuer` types installed within the same
+cluster, including mixtures of issuers configured to enroll from CyberArk
+Certificate Manager SaaS, CyberArk Certificate Manager Self-Hosted, and Palo
+Alto Networks NGTS. This allows you to be flexible in the
+deployment method that you prefer to use.
+
+Automated certificate renewal and management are provided for `Certificates`
+using the CyberArk `Issuer`.
+
+A single CyberArk `Issuer` represents a single CyberArk 'zone' so you must create one
+`Issuer` resource for each zone you want to use.  A zone is a single entity that
+combines the policy that governs certificate issuance with information about how
+certificates are organized in CyberArk to identify the business application and
+establish ownership.
+
+You can configure your `Issuer` resource to either issue certificates only
+within a single namespace, or cluster-wide (using a `ClusterIssuer` resource).
+For more information on the distinction between `Issuer` and `ClusterIssuer`
+resources, read the [Namespaces](../concepts/issuer.md#namespaces) section.
+
+## Creating an Issuer for CyberArk Certificate Manager SaaS
+
+If you haven't already done so, create your CyberArk Certificate Manager SaaS
+account on this [page](https://www.cyberark.com/try-buy/certificate-manager-saas-trial/)
+and copy the API key from your user preferences. Then, you may want to create a
+custom CA Account and Issuing Template, or choose to use the defaults created
+automatically for testing ("Built-in CA" and "Default", respectively). Lastly,
+create an Application to establish ownership of all certificates requested by
+your cert-manager Issuer, and assign the Issuing Template to it.
+
+> Make a note of the Application name and API alias of the Issuing Template because
+> together they comprise the 'zone' you will need for your `Issuer` configuration.
+
+In order to set up a CyberArk `Issuer`, you must first create a Kubernetes
+`Secret` resource containing your API key:
+
+```bash
+$ kubectl create secret generic \
+       api-key-secret \
+       --namespace='NAMESPACE OF YOUR ISSUER RESOURCE' \
+       --from-literal=apikey='YOUR_API_KEY_HERE'
+```
+
+> **Note**: If you are configuring your issuer as a `ClusterIssuer` resource in
+> order to serve `Certificates` across your whole cluster, you must set the
+> `--namespace` parameter to `cert-manager`, which is the default `Cluster
+> Resource Namespace`. The `Cluster Resource Namespace` can be configured
+> through the `--cluster-resource-namespace` flag on the cert-manager controller
+> component.
+
+This API key will be used by cert-manager to interact with CyberArk Certificate
+Manager SaaS on your behalf.
+
+Once the API key `Secret` has been created, you can create your `Issuer` or
+`ClusterIssuer` resource. If you are creating a `ClusterIssuer` resource, you
+must change the `kind` field to `ClusterIssuer` and remove the
+`metadata.namespace` field.
+
+Save the below content after making your amendments to a file named `issuer.yaml`.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: corp-issuer
+  namespace: <NAMESPACE YOU WANT TO ISSUE CERTIFICATES IN>
+spec:
+  venafi:
+    zone: 'My Application\My CIT' # Set this to <Application Name>\<Issuing Template Alias>
+    cloud:
+      apiTokenSecretRef:
+        name: api-key-secret
+        key: apikey
+```
+
+You can then create the Issuer using `kubectl create`.
+
+```bash
+$ kubectl create -f issuer.yaml
+```
+
+Verify the `Issuer` has been initialized correctly using `kubectl describe`.
+
+```bash
+$ kubectl get issuer corp-issuer --namespace='NAMESPACE OF YOUR ISSUER RESOURCE' -o wide
+NAME           READY   STATUS                 AGE
+corp-issuer    True    Venafi issuer started  2m
+```
+
+You are now ready to issue certificates using the newly provisioned CyberArk
+`Issuer` and CyberArk Certificate Manager SaaS.
+
+Read the [Requesting Certificates](../usage/certificate.md) document for
+more information on how to create Certificate resources.
+
+
+## Creating an Issuer for CyberArk Certificate Manager Self-Hosted
+
+The CyberArk `Issuer` (formerly known as Venafi) allows you to obtain
+certificates from a properly configured self-hosted instance of CyberArk
+Certificate Manager.
+
+The setup is similar to the CyberArk Certificate Manager SaaS configuration
+above, however some of the connection parameters are slightly different.
+
+> **Note**: You *must* allow "User Provided CSRs" as part of your policy in
+> CyberArk Certificate Manager Self-Hosted, as this is the only type supported
+> by cert-manager at this time.
+>
+> More specifically, the valid configurations of the "CSR handling" are:
+>
+> - "User Provided CSRs" selected and unlocked,
+> - "User Provided CSRs" selected and locked,
+> - "Service Generated CSRs" selected and unlocked.
+>
+> When using "Service Generated CSRs" selected and unlocked, the default CSR
+> configuration present in your policy folder will override the configuration of
+> your Certificate resource. The subject DN, key algorithm, and key size will be
+> overridden by the values set in the policy folder.
+>
+> With "Service Generated CSRs" selected and locked, the certificate issuance
+> will systematically fail with the following message:
+>
+> ```plain
+> 400 PKCS#10 data will not be processed. Policy "\VED\Policy\foo" is locked to a Server Generated CSR.
+> ```
+
+In order to set up a CyberArk `Issuer`, you must first create a Kubernetes
+`Secret` resource containing your CyberArk Certificate Manager Self-Hosted API
+credentials.
+
+### Access Token Authentication
+
+1. [Set up token authentication](https://docs.venafi.com/Docs/current/TopNav/Content/SDK/AuthSDK/t-SDKa-Setup-OAuth.php).
+
+   NOTE: Do not select "Refresh Token Enabled" and set a *long* "Token Validity
+   (days)". The Refresh Token feature is not supported by cert-manager's CyberArk
+   `Issuer`.
+
+2. Create a new user with sufficient privileges to manage and revoke certificates in a particular policy folder (zone).
+
+   E.g. `k8s-xyz-automation`
+
+3. [Create a new application integration](https://docs.venafi.com/Docs/current/TopNav/Content/API-ApplicationIntegration/t-APIAppIntegrations-creating.php)
+
+   Create an application integration with name and ID `cert-manager.io`.
+   Set the "Base Access Settings" to `certificate: manage`.
+
+   "Edit Access" to the new application integration, and allow it to be used by the user you created earlier.
+
+4. [Generate an access token](https://github.com/Venafi/vcert/blob/master/README-CLI-PLATFORM.md#obtaining-an-authorization-token)
+
+   ```
+   vcert getcred \
+     --username k8s-xyz-automation \
+     --password somepassword \
+     -u https://tpp.example.com/vedsdk \
+     --client-id cert-manager.io \
+     --scope "certificate:manage,revoke"
+   ```
+
+   This will print an access-token to `stdout`. E.g.
+
+   ```
+   vCert: 2025/08/08 16:34:27 Getting credentials
+   access_token:  I69n.............y1VjNJT3o9U0Wko19g==
+   access_token_expires:  2026-08-08T15:34:30Z
+   ```
+
+5. Save the access-token to a Secret in the Kubernetes cluster
+
+    ```bash
+    $ kubectl create secret generic \
+          tpp-secret \
+          --namespace=<NAMESPACE OF YOUR ISSUER RESOURCE> \
+          --from-literal=access-token='YOUR_TPP_ACCESS_TOKEN'
+    ```
+
+### Username / Password Authentication
+
+> **Note**: when using username  / password authentication, cert-manager will manage the generation of access token for you. cert-manager does not use refresh tokens to renew access token.
+
+1. Create a new user with sufficient privileges to manage certificates in a particular policy folder (zone).
+
+   E.g. `k8s-xyz-automation`
+
+2. [Create a new application integration](https://docs.venafi.com/Docs/current/TopNav/Content/API-ApplicationIntegration/t-APIAppIntegrations-creating.php)
+
+   Create an application integration with name and ID `cert-manager.io`.
+   Set the "Base Access Settings" to `certificate: manage`.
+
+   "Edit Access" to the new application integration, and allow it to be used by the user you created earlier.
+
+3. Save the credentials to a Secret in the Kubernetes cluster
+
+    ```bash
+    $ kubectl create secret generic \
+          tpp-secret \
+          --namespace=<NAMESPACE OF YOUR ISSUER RESOURCE> \
+          --from-literal=username='YOUR_TPP_USERNAME_HERE' \
+          --from-literal=password='YOUR_TPP_PASSWORD_HERE'
+    ```
+
+
+> Note: By default cert-manager uses `cert-manager.io` as client ID when authenticating to CyberArk. You can customize this by adding `client-id` key to the secret:
+>```bash
+>$ kubectl create secret generic \
+>       tpp-secret \
+>       --namespace=<NAMESPACE OF YOUR ISSUER RESOURCE> \
+>       --from-literal=username='YOUR_TPP_USERNAME_HERE' \
+>       --from-literal=password='YOUR_TPP_PASSWORD_HERE' \
+>       --from-literal=client-id='YOUR_TPP_CLIENT-ID_HERE'
+>```
+
+These credentials will be used by cert-manager to interact with your CyberArk
+instance. Username attribute must adhere to the `<identity
+provider>:<username>` format.  For example: `local:admin`.
+
+Once the Secret containing credentials has been created, you can create your
+`Issuer` or `ClusterIssuer` resource. If you are creating a `ClusterIssuer`
+resource, you must change the `kind` field to `ClusterIssuer` and remove the
+`metadata.namespace` field.
+
+> ℹ️  If you are using a `ClusterIssuer` resource, the Secret containing the credentials must be in the `Cluster
+> Resource Namespace`, which is `cert-manager` by default. The `Cluster Resource Namespace` can be configured
+> through the `--cluster-resource-namespace` flag on the cert-manager controller
+> component.
+> 
+> 📖 Read [Issuer Configuration](./README.md#cluster-resource-namespace) to learn more about the concept of a ClusterIssuer and the Cluster Resource Namespace
+
+Save the below content after making your amendments to a file named
+`corp-issuer.yaml`.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: corp-issuer
+  namespace: <NAMESPACE YOU WANT TO ISSUE CERTIFICATES IN>
+spec:
+  venafi:
+    zone: \VED\Policy\devops\cert-manager # Set this to the policy folder you want to use
+    tpp:
+      url: https://tpp.venafi.example/vedsdk # Change this to the URL of your CyberArk Certificate Manager Self-Hosted instance
+      caBundle: <base64 encoded string of caBundle PEM file, or empty to use system root CAs>
+      ## Use only caBundle above or the caBundleSecretRef below. Secret can be created from a ca.crt file by running below command
+      ## kubectl create secret generic custom-tpp-ca --from-file=/my/certs/ca.crt -n <cert-manager-namespace>
+      # caBundleSecretRef:
+      #  name: custom-tpp-ca
+      #  key: ca.crt
+      credentialsRef:
+        name: tpp-secret
+```
+
+You can then create the `Issuer` using `kubectl create -f`.
+
+```bash
+$ kubectl create -f corp-issuer.yaml
+```
+
+Verify the `Issuer` has been initialized correctly using `kubectl describe`.
+
+```bash
+$ kubectl describe issuer corp-issuer --namespace='NAMESPACE OF YOUR ISSUER RESOURCE'
+```
+
+You are now ready to issue certificates using the newly provisioned CyberArk
+`Issuer` and CyberArk Certificate Manager Self-Hosted.
+
+Read the [Requesting Certificates](../usage/certificate.md) document for
+more information on how to create Certificate resources.
+
+## Creating an Issuer for Palo Alto Networks Next-Generation Trust Security
+
+The CyberArk `Issuer` supports [Palo Alto Networks Next-Generation Trust
+Security (NGTS)][ngts], a cloud-native certificate management platform.
+Authentication uses OAuth 2.0 Client Credentials, so no API key or
+username/password is required.
+
+[ngts]: https://www.paloaltonetworks.com/network-security/next-gen-trust-security
+
+### Prerequisites
+
+Access to NGTS is managed by Strata Cloud Manager rather than by NGTS itself.
+Users and machine identities belong to a Tenant Service Group (TSG) and are
+granted permissions there, so the credentials for your `Issuer` are created in
+Strata Cloud Manager, not in the NGTS console. See [Access Management for New
+and Migrating Users][ngts-access] for a full description of this model.
+
+[ngts-access]: https://docs.paloaltonetworks.com/next-gen-trust-security/next-gen-trust-security/about-vaas/gs-Cloud-Discovery/c-user-account-management-overview
+[strata-service-account]: https://docs.paloaltonetworks.com/common-services/identity-and-access-access-management/manage-identity-and-access/add-service-accounts
+[vcert-ngts]: https://github.com/Venafi/vcert/blob/master/README-CLI-NGTS.md#prerequisites
+
+1. **Create a Strata service account.**
+
+   cert-manager reaches NGTS through the Strata API gateway, so it requires a
+   [Strata service account][strata-service-account]. NGTS also offers
+   "built-in accounts", but those authenticate directly against the NGTS data
+   plane and are reserved for product-delivered integrations, so they cannot
+   be used with the CyberArk `Issuer`.
+
+   Creating the service account gives you the **Client ID** and **Client
+   Secret** used below. The client secret is displayed only once, so record it
+   before leaving the page.
+
+2. **Note the Tenant Service Group ID.**
+
+   The service account's display name has the form
+   `<name>@<tsg-id>.iam.panserviceaccount`, where `<tsg-id>` is the ten-digit
+   ID of the Tenant Service Group that owns the account. cert-manager sends
+   the `tsgID` field of the `Issuer` as the OAuth 2.0 scope `tsg_id:<tsg-id>`
+   when requesting an access token.
+
+   `tsgID` need not be the TSG in the display name. It may be any TSG which
+   the service account is authorized for, including a child TSG, so set it to
+   the TSG which owns the Certificate Issuing Template that you intend to
+   issue from. Note that NGTS is activated in a parent TSG and is not shared
+   with child TSGs automatically, and that a child TSG must be in the same
+   data region as its parent.
+
+3. **Grant the NGTS permissions that cert-manager requires.**
+
+   Assign the service account a role which grants the following NGTS
+   permissions:
+
+   - `ngts.certificate_issuing_template.get`
+   - `ngts.certificate_request.create`
+   - `ngts.certificate_request.get`
+   - `ngts.certificate_content.get`
+   - `ngts.certificate.get`
+   - `ngts.edge_encryption_key.get`
+
+   This is the union of the permissions which [VCert][vcert-ngts] documents
+   for its `enroll` and `pickup` commands, which are the only NGTS operations
+   that the `Issuer` performs. A read-only role such as *View Only Admin* is
+   not sufficient, because requesting a certificate is a write.
+
+   > ⚠️ If you grant *Superuser* rather than a narrower role, constrain it to
+   > the Next-Gen Trust Security application. An unconstrained *Superuser*
+   > role grants Superuser rights across the whole Strata platform.
+
+In order to set up an NGTS `Issuer`, you must first create a Kubernetes
+`Secret` resource containing your OAuth 2.0 client credentials. The secret
+must have the keys `client-id` and `client-secret`:
+
+```bash
+$ kubectl create secret generic \
+       ngts-credentials \
+       --namespace='NAMESPACE OF YOUR ISSUER RESOURCE' \
+       --from-literal=client-id='YOUR_CLIENT_ID' \
+       --from-literal=client-secret='YOUR_CLIENT_SECRET'
+```
+
+> **Note**: If you are configuring your issuer as a `ClusterIssuer` resource in
+> order to serve `Certificates` across your whole cluster, you must set the
+> `--namespace` parameter to `cert-manager`, which is the default `Cluster
+> Resource Namespace`. The `Cluster Resource Namespace` can be configured
+> through the `--cluster-resource-namespace` flag on the cert-manager controller
+> component.
+
+This secret will be used by cert-manager to obtain OAuth 2.0 access tokens
+from the NGTS token endpoint on your behalf.
+
+Once the credentials `Secret` has been created, you can create your `Issuer`
+or `ClusterIssuer` resource. If you are creating a `ClusterIssuer` resource,
+you must change the `kind` field to `ClusterIssuer` and remove the
+`metadata.namespace` field.
+
+The `zone` is the name of the Certificate Issuing Template (CIT) in NGTS that will be used to issue certificates. Unlike CyberArk Certificate Manager SaaS which requires both an Application name and CIT alias in the format `Application\CIT`, NGTS only requires the CIT name. NGTS has no equivalent of the CyberArk Certificate Manager SaaS *Application*; certificates are instead owned by the Tenant Service Group in which they are requested.
+
+Save the below content after making your amendments to a file named
+`issuer.yaml`.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: corp-issuer
+  namespace: <NAMESPACE YOU WANT TO ISSUE CERTIFICATES IN>
+spec:
+  venafi:
+    zone: 'My CIT' # Set this to the name of your NGTS Certificate Issuing Template
+    ngts:
+      tsgID: '1234567890' # Your Tenant Service Group ID
+      credentialsRef:
+        name: ngts-credentials
+      # tokenEndpoint and url are optional; uncomment to override the defaults
+      # tokenEndpoint: https://auth.apps.paloaltonetworks.com/oauth2/access_token
+      # url: https://api.strata.paloaltonetworks.com/ngts
+```
+
+You can then create the `Issuer` using `kubectl create -f`.
+
+```bash
+$ kubectl create -f issuer.yaml
+```
+
+Verify the `Issuer` has been initialized correctly using `kubectl describe`.
+
+```bash
+$ kubectl describe issuer corp-issuer --namespace='NAMESPACE OF YOUR ISSUER RESOURCE'
+```
+
+You are now ready to issue certificates using the newly provisioned CyberArk
+`Issuer` and Palo Alto Networks NGTS.
+
+Read the [Requesting Certificates](../usage/certificate.md) document for
+more information on how to create Certificate resources.
+
+### NGTS field reference
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `tsgID` | Yes | — | Tenant Service Group ID, used to scope the OAuth 2.0 access token. |
+| `credentialsRef.name` | Yes | — | Name of the Kubernetes `Secret` containing `client-id` and `client-secret`. |
+| `tokenEndpoint` | No | `https://auth.apps.paloaltonetworks.com/oauth2/access_token` | OAuth 2.0 token endpoint URL used to obtain access tokens. |
+| `url` | No | `https://api.strata.paloaltonetworks.com/ngts` | Base URL for the NGTS API endpoint. |
+
+## Issuer specific annotations
+
+### Custom Fields
+
+Starting `v0.14`, you can pass custom fields to CyberArk Certificate Manager
+Self-Hosted using the `venafi.cert-manager.io/custom-fields` annotation on
+Certificate resources.
+The value is a JSON encoded array of custom field objects having a `name` and `value` key.
+For example:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-com-certificate
+  annotations:
+    venafi.cert-manager.io/custom-fields: |-
+      [
+        {"name": "field-name", "value": "field value"},
+        {"name": "field-name-2", "value": "field value 2"}
+      ]
+...
+```
+
+### Issuer Custom Fields
+
+Starting `v1.20`, you can use `venafi.cert-manager.io/custom-fields` annotation on an `Issuer` or `ClusterIssuer` resource.
+This configuration would be applied to all Certificate requests created from `Issuer`.
+
+It is possible to override or append custom configuration to `Certificate` resources via the `Issuer` assigned to it. 
+For example with an `Issuer` such as:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: corp-issuer
+  annotations:
+    venafi.cert-manager.io/custom-fields: |-
+      [
+        {"name": "Environment", "value": "Dev"},
+      ]
+```
+
+and a `Certificate` resource:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-com-certificate
+  annotations:
+    venafi.cert-manager.io/custom-fields: |-
+      [
+        {"name": "Team", "value": "amber"},
+      ]
+...
+```
+
+Final configuration will be:
+
+```json
+{"name": "Environment", "value": "Dev"},
+{"name": "Team", "value": "amber"}
+```

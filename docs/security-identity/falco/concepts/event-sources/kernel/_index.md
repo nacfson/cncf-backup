@@ -1,0 +1,104 @@
+---
+title: Kernel Events
+description: Events related to the Kernel tells us most of what happens above.
+linktitle: Kernel Events
+weight: 20
+aliases:
+- drivers
+- ../drivers
+- ../../drivers
+- ../../event-sources/kernel
+- ../../event-sources/drivers
+---
+
+Falco uses different instrumentations to analyze the system workload and pass security events to {{< glossary_tooltip text="userspace" term_id="user-space" >}}. We usually refer to these instrumentations as {{< glossary_tooltip text="drivers" term_id="drivers" >}} since a driver runs in {{< glossary_tooltip text="kernelspace" term_id="kernel-space" >}}. The driver provides the **syscall event source** since the monitored events are strictly related to the {{< glossary_tooltip text="syscall" term_id="syscalls" >}} context.
+
+There are several supported drivers:
+
+- Modern eBPF probe *(default)*
+- Kernel module
+
+|             | Kernel module | Modern eBPF probe                                                    |
+| ----------- |---------------| -------------------------------------------------------------------- |
+| **x86_64**  | >= 3.10       | [Minimal set of features](/docs/concepts/event-sources/kernel/#requirements) |
+| **aarch64** | >= 3.10       | [Minimal set of features](/docs/concepts/event-sources/kernel/#requirements) |
+
+## Kernel module
+
+By default, the {{< glossary_tooltip text="kernel module" term_id="kernel-module" >}} will be installed when installing the Falco [debian/rpm](/docs/getting-started/installation) package, when running the `falcoctl driver` tool shipped within the [binary package](/docs/setup/tarball/), or when running the `falcosecurity/falco-driver-loader` docker image (that just wraps the aforementioned tool).
+
+To install the kernel module, please refer to the [installation](/docs/getting-started/installation/#install-driver) page.
+
+### Least privileged mode
+
+The kernel module requires full privileges and cannot run with Linux capabilities
+
+## Modern eBPF probe
+
+The {{< glossary_tooltip text="modern eBPF probe" term_id="modern-ebpf-probe" >}} is an alternative driver for Falco. The main advantage it brings to the table is that it is embedded into Falco, which means that you don't have to download or build anything, if your kernel is recent enough Falco will automatically inject it!
+
+### What's new
+
+The new probe is highly customizable, you are not obliged to use one buffer [for each CPU](https://github.com/falcosecurity/falco/blob/660da98e4c37f4d4f79ec4bebf4379d9b90b0892/falco.yaml#L292) you can also use just one huge buffer for all your CPUs! And obviously, also the [buffer size](https://github.com/falcosecurity/falco/blob/660da98e4c37f4d4f79ec4bebf4379d9b90b0892/falco.yaml#L226) is customizable! All this is possible thanks to new outstanding features like [the CO-RE paradigm](https://nakryiko.com/posts/bpf-portability-and-co-re/), [the BPF ring buffer](https://nakryiko.com/posts/bpf-ringbuf/) and many others, if you are curious you can read more about them in this [blog post](/blog/falco-modern-bpf#what-s-new).
+
+### Requirements
+
+The modern eBPF probe doesn't require a specific kernel version. Usually, all versions `>=5.8` are enough but there are cases in which the required features could also be backported into older kernels, so it wouldn't be completely fair to define `5.8` as the first supported version. The 2 main required features are:
+
+1. [BPF ring buffer](https://www.kernel.org/doc/html/next/bpf/ringbuf.html) support.
+2. A kernel that exposes [BTF](https://docs.kernel.org/bpf/btf.html).
+
+Falco can automatically detect if these features are available on the running machine and can notify you if something is missing. As an alternative, you could always use `bpftool`, you just need to type the following commands:
+
+```bash
+sudo bpftool feature probe kernel | grep -q "map_type ringbuf is available" && echo "true" || echo "false" 
+sudo bpftool feature probe kernel | grep -q "program_type tracing is available" && echo "true" || echo "false" 
+```
+
+Since Falco 0.45, the probe uses BPF atomic compare-and-swap instructions when the kernel supports them. These instructions were introduced in Linux 5.12, but availability depends on the architecture and any distribution backports. Falco checks support at startup. If the instructions are unavailable, it falls back to plain stores and logs a warning containing `no BPF atomics on this kernel`. This fallback relies on the kernel preventing preemption while an auxiliary map is being claimed.
+
+### Auxiliary map memory
+
+The probe stages variable-size events in auxiliary maps before sending them to the ring buffers. Since Falco 0.45, it allocates two auxiliary map segments per possible CPU, including offline CPUs, so an event can keep its segment while another event is processed on the same CPU. Each segment has 128 KiB of event storage, plus metadata. This doubles auxiliary event storage from 128 KiB to 256 KiB per possible CPU; it does not double the total memory used by Falco.
+
+The auxiliary map pool is separate from the ring buffers configured through `engine.modern_ebpf.buf_size_preset` and `engine.modern_ebpf.cpus_for_each_buffer`. See [kernel event counters](/docs/concepts/metrics/#modern-ebpf-auxiliary-map-counters) for the related diagnostics.
+
+### How to run it
+
+Modern eBPF probe is bundled into the userspace binary and works out of the box, regardless of the kernel release, thanks to the eBPF feature called 'Compile Once Run Everywhere' (CO-RE). To enable it in Falco, just set the `engine.kind` configuration key to `modern_ebpf`. 
+
+It is supported in all the installation methods of other drivers:
+
+* [Falco packages](/docs/setup/packages/#systemd-setup-with-dialog)
+* [Falco binary](/docs/setup/tarball/)
+* [Docker](/docs/setup/container/#docker-privileged-modern-ebpf)
+* [Helm chart](https://github.com/falcosecurity/charts/tree/master/charts/falco#daemonset)
+
+
+### Useful resources
+
+* [Modern BPF blog post](/blog/falco-modern-bpf/)
+* [Modern BPF proposal](https://github.com/falcosecurity/libs/blob/master/proposals/20220329-modern-bpf-probe.md)
+* [eBPF day presentation](https://youtu.be/BxoKztfHnYY)
+
+### Least privileged mode
+
+The minimal set of capabilities required by Falco to run the modern eBPF probe is the following:
+
+- `CAP_SYS_BPF`
+- `CAP_SYS_PERFMON`
+- `CAP_SYS_RESOURCE`
+- `CAP_SYS_PTRACE`
+
+Let's see them in detail:
+
+- **CAP_SYS_RESOURCE**: Falco needs this capability to be able to call the `setrlimit` syscall. The `setrlimit` syscall is used together with the `RLIMIT_MEMLOCK` flag to change the amount of memory that can be _mlocked_ into RAM. The default value for this memory limit is very low, so even a very simple eBPF program would fail. The workaround is to increase the default value to something acceptable so eBPF maps can be correctly _mlocked_ in memory.
+- **CAP_SYS_PTRACE**: Falco needs this capability because it accesses paths like `/proc/<pid>/environ`. From the userspace standpoint, the permission to do so is mapped to the `CAP_SYS_PTRACE` capability. For the curious reader, see [environ_open](https://elixir.bootlin.com/linux/latest/source/fs/proc/base.c#L937) implementation in the kernel.
+- **CAP_SYS_ADMIN**: Falco needs this capability to load eBPF programs and maps, and to interact with the system using the `bpf` syscall.
+
+This set of capabilities should work most of the time but under some conditions, it is possible to replace the `CAP_SYS_ADMIN` with two more granular capabilities: `CAP_SYS_BPF` and `CAP_SYS_PERFMON`.
+
+The only condition needed is a kernel version that supports these capabilities. The Linux Kernel version `5.8` is the first one that officially supports them but they could have been backported on older versions on some distributions.
+
+> **Please note**: we will try to do our best to keep this as the minimum required set but due to [some issues with CO-RE relocations](https://lore.kernel.org/bpf/CAGQdkDvYU_e=_NX+6DRkL_-TeH3p+QtsdZwHkmH0w3Fuzw0C4w@mail.gmail.com/T/#u) it is possible that this changes in the future.
+

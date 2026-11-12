@@ -1,0 +1,656 @@
+---
+title: "PyTorch"
+sidebar_position: 4
+---
+
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# PyTorch
+
+## Read
+
+This requires `torch` to be installed.
+
+You can read all the data into a `torch.utils.data.Dataset` or `torch.utils.data.IterableDataset`:
+
+```python
+from torch.utils.data import DataLoader
+
+table_read = read_builder.new_read()
+dataset = table_read.to_torch(splits, streaming=True, prefetch_concurrency=2)
+dataloader = DataLoader(
+    dataset,
+    batch_size=2,
+    num_workers=2,  # Concurrency to read data
+    shuffle=False
+)
+
+# Collect all data from dataloader
+for batch_idx, batch_data in enumerate(dataloader):
+    print(batch_data)
+
+# output:
+#   {'user_id': tensor([1, 2]), 'behavior': ['a', 'b']}
+#   {'user_id': tensor([3, 4]), 'behavior': ['c', 'd']}
+#   {'user_id': tensor([5, 6]), 'behavior': ['e', 'f']}
+#   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
+```
+
+When the `streaming` parameter is true, it will iteratively read. When it is
+false, eligible data-evolution reads fetch each DataLoader batch lazily by row
+ID; other reads retain an Arrow table in memory for map-style access.
+
+In map-style mode, `__getitems__(indices)` preserves input order and repeated
+positions, including sampling with replacement. For example, `[2, 0, 2]`
+returns `[dataset[2], dataset[0], dataset[2]]`. DataLoader uses this batch
+interface for sampler output. Empty input returns an empty list; out-of-range
+positions raise `IndexError`. These indices are Dataset positions, not Paimon
+`_ROW_ID` values. To fetch an ordered batch of Paimon row IDs directly, use
+[`MultimodalTable.take_batch`](./multimodal-reading#row-ids).
+
+**`prefetch_concurrency`** (default: 1): In streaming row mode, controls
+reader threads per DataLoader worker. It has no effect in non-streaming mode.
+
+### Named nested projections
+
+Map-style datasets support named ROW fields and literal MAP-key projections,
+including projections mixed with top-level columns:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    "user_id": "id",
+    "city": "profile.city",
+    "source": "attributes['source']",
+})
+splits = read_builder.new_scan().plan().splits()
+dataset = read_builder.new_read().to_torch(splits, streaming=False, batch_format="row")
+sample = dataset[0]
+samples = dataset.__getitems__([2, 0, 2])
+```
+
+Each sample uses the specified aliases in projection order. These requests
+materialize their Arrow result in memory when the dataset is constructed,
+including on Data Evolution tables. Indexing preserves the requested order
+and duplicate indices. Values and supported reads follow `to_arrow`, including
+its table, format, and authorization restrictions.
+
+Map-style row datasets also support the existing float32 `variant_get` and
+`try_variant_get` projections, including mixtures with ordinary columns and
+nested paths:
+
+```python
+read_builder = table.new_read_builder().with_projection({
+    "user_id": "id",
+    "score": "try_variant_get(payload, '$.score', 'float')",
+})
+splits = read_builder.new_scan().plan().splits()
+dataset = read_builder.new_read().to_torch(splits, streaming=False, batch_format="row")
+sample = dataset[0]
+samples = dataset.__getitems__([2, 0, 2])
+```
+
+VARIANT extractions require a compatible Native reader. These requests
+materialize through `to_arrow` when the dataset is constructed, including on
+Data Evolution tables; they do not use lazy row-ID reads. Aliases, output order,
+repeated sources, extracted values and nulls follow the same Arrow request.
+`variant_get` cast errors propagate during construction, while `try_variant_get`
+returns null for failed casts. Initialization retains the Arrow result in memory.
+Batch formats (`"pyarrow"` and `"torch"`) still require `streaming=True`.
+
+### Distributed Sharding
+
+Streaming reads shard splits across DDP ranks and DataLoader workers:
+
+```python
+def main():
+    dataset = table_read.to_torch(
+        splits,
+        streaming=True,
+        auto_detect_rank=True,
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=32,
+        num_workers=2,
+        multiprocessing_context="spawn",
+    )
+
+    with model.join():
+        for batch in dataloader:
+            train(batch)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Automatic rank sharding is opt-in. Enable it only when every rank receives the
+same ordered, complete splits from one snapshot; leave it disabled for splits
+already sharded by the application.
+Automatic detection uses the default process group. For subgroup DDP, resolve
+the context from the group before creating the DataLoader:
+
+```python
+import torch.distributed as dist
+
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    sharding_rank=dist.get_rank(ddp_group),
+    sharding_world_size=dist.get_world_size(ddp_group),
+)
+```
+
+With multi-worker DDP, use `spawn` (or `forkserver`) and create and iterate the
+DataLoader through an `if __name__ == "__main__":` guarded entry point.
+A rank may receive fewer rows because splits have different sizes; `join()`
+keeps DDP collectives aligned while preserving every row without duplication.
+A limit that may truncate the input is rejected when multiple ranks are active.
+
+### Batch Streaming
+
+For batch-oriented training, make the streaming dataset yield batches directly:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=1024,
+)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for batch in dataloader:
+    train(batch["features"], batch["label"])
+```
+
+`batch_format="pyarrow"` yields PyArrow `RecordBatch` objects instead;
+`batch_format="torch"` yields dictionaries of tensors. The default Tensor
+converter supports non-null numeric, boolean, and numeric fixed-size-list
+columns. Use `to_tensor_fn` for other types or custom conversion.
+
+Without shuffle, omit `batch_size` to preserve native reader batches. Otherwise,
+batches are combined or sliced to the requested size. Use
+`DataLoader(batch_size=None)` to disable a second batching step.
+Numeric tensors may share read-only Arrow buffers; clone them before in-place
+mutation. Batch formats currently require `prefetch_concurrency=1`.
+
+### Shuffled Batch Streaming
+
+Set `shuffle=True` to mix rows across input batches while keeping values in
+Arrow until the final Tensor conversion. The same options work with
+`batch_format="pyarrow"` and custom `to_tensor_fn` converters:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=256,
+    shuffle=True,
+    seed=42,
+    buffer_size=4096,
+    max_buffer_input_splits=4,
+)
+loader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for epoch in range(10):
+    dataset.set_epoch(epoch)
+    for batch in loader:
+        train(batch["features"], batch["label"])
+```
+
+Each worker retains at most `buffer_size` rows in a rolling shuffle buffer and
+replaces randomly selected slots with rows from incoming Arrow blocks. Input
+blocks contain at most `buffer_size` rows; gathering replacements, output
+batching, and each open format reader use additional memory. This is a row
+bound, not a byte bound. The buffer drains early if combining Arrow blocks
+would overflow a 32-bit offset. Without `batch_size`, output blocks contain at
+most `buffer_size` rows.
+
+`max_buffer_input_splits` bounds the number of interleaved split readers per
+worker; `1` reads splits in order. A binding limit keeps the existing ordered
+read path so it selects the same rows before shuffling. Filters and distributed
+worker/rank sharding also precede shuffle. Each selected row is emitted once.
+
+The shuffle is local to each worker's buffer, not a uniform permutation of the
+whole dataset. The same seed, epoch, input batches and worker/rank configuration
+reproduce the same order; `set_epoch()` also reaches persistent workers. Changing
+reader batching or worker configuration can change the order. Arrow and Tensor
+formats share the same shuffle path, while row-format split interleaving can
+produce a different order. The existing `prefetch_concurrency=1` requirement
+also applies to shuffled batches.
+
+## Video frame descriptors
+
+For a multimodal frame table, use the higher-level scan API:
+
+```python
+dataset = (
+    frames.scan()
+    .select(["episode_id", "state", "action", "video"])
+    .to_torch(streaming=True)
+)
+```
+
+The `.video` column yields serialized `VideoFrameDescriptor` values whose
+embedded frame ordinals keep frame mapping out of the normal data file. Use
+`pypaimon.multimodal.VideoFrameCollator` as the DataLoader `collate_fn` to open
+physical video ranges and cache decoder sessions per worker. See
+[Multimodal API: Video Frame Storage](video#video-frame-storage)
+for the write path and a complete decoder example.
+## Contiguous Windows
+
+Use a map-style `ContiguousWindowDataset` to construct training samples from
+one materialized frame table. Each field can have its own history or future
+window, and windows never cross a sequence boundary. The dataset builds an index
+from only the group column, order column, and Paimon row IDs. Projected values,
+including BLOB payloads, are read from the pinned snapshot when a sample is
+requested; they are not retained in the index.
+
+```python
+from functools import partial
+
+import torch
+from torch.utils.data import DataLoader
+from pypaimon.multimodal.window_transforms import images_to_tensor, to_tensor
+
+dataset = (
+    frames.scan()
+    .to_contiguous_window_dataset(
+        columns=["state", "image", "action"],
+        frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+        group_key="episode_index",
+        order_key="frame_index",
+        boundary="pad",
+        column_transforms={
+            "state": partial(to_tensor, dtype=torch.float32),
+            "action": partial(to_tensor, dtype=torch.float32),
+            "image": images_to_tensor,
+        },
+    )
+)
+
+loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
+```
+
+Each raw item contains scalar group/order keys, a list for every selected column,
+and a Boolean `<column>_is_pad` tensor where `True` marks padding. Unspecified
+field offsets default to `[0]`. The example produces state/action tensors with
+time lengths 3/16 and an image tensor of shape `(1, C, H, W)`; DataLoader adds the
+batch dimension. `pad_values` can replace endpoint repetition for individual
+columns, before any transforms. `adapter` can normalize or rename fields and
+produce a model-specific mapping. Keep callbacks picklable for multiple workers.
+
+Scheduled anchors start at each group's first row and advance by `stride`
+(default `1`). `boundary="drop"` (default) omits anchors incomplete for any
+field, `boundary="pad"` pads either end, and `boundary="error"` rejects any
+scheduled incomplete window. `delta_timestamps` with an explicit `fps` is an
+alternative to integer offsets, with frame-grid alignment checked against
+`tolerance_s`. Existing `window_size`/`anchor_columns`/`tail` calls retain their
+single `is_pad` output. See [multimodal reading](multimodal-reading#contiguous-windows-for-pytorch)
+for the full sample and conversion contract.
+Rows are sorted by `order_key` inside each `group_key` value. Order values must
+be integers which increase by exactly one; duplicates and missing steps are
+rejected, and windows never cross groups. The resolved Paimon
+snapshot is pinned for the lifetime of the dataset, so later commits cannot
+change its index or sample contents. A dataset pinned through `tag_name` fails
+its reads if the tag is moved to another snapshot, rather than mixing rows from
+the two snapshots.
+
+Use normal PyTorch samplers for shuffling and distributed training. For DDP,
+pass `DistributedSampler(dataset)` to DataLoader, omit `shuffle=True`, and call
+the sampler's `set_epoch(epoch)` each epoch. Its padding or drop behavior still
+applies when the sample count is not divisible by the number of ranks. Dataset
+version pinning does not save sampler progress or random augmentation state.
+
+Columns configured by `video-frame-field` are decoded after the requested rows
+have been coalesced. Their descriptor metadata remains intact, overlapping
+windows reuse the same decoded rows, and `column_transforms={"video":
+torch.stack}` converts the raw list of `CHW` frames to `TCHW`. Install
+`pypaimon[torch,video]` for PyAV, or install TorchCodec separately. Select the
+backend with `video_backend="pyav"` or `"torchcodec"`; omitting the option
+selects an available backend.
+
+### Task-local context and anchor selection
+
+The scan query defines the readable context, including its filters and limit.
+For a task or rank-local dataset, restrict that query to complete episodes.
+Use `anchor_row_ids` to select training anchors without removing the history
+or future frames needed by their windows:
+
+```python
+context = frames.scan(tag_name="train-v1").where("task_id = 'pick'")
+eligible = (
+    frames.scan(tag_name="train-v1")
+    .where("task_id = 'pick' AND eligible = true")
+    .select(["episode_index", "frame_index"])
+    .with_row_id()
+    .to_arrow()
+)
+dataset = context.to_contiguous_window_dataset(
+    columns=["state", "image", "action"],
+    frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+    anchor_row_ids=eligible.column("_ROW_ID").to_pylist(),
+    boundary="pad",
+)
+```
+
+Both scans must resolve to the same fixed snapshot. Row IDs outside the
+context raise `ValueError`. Selection intersects the original stride schedule;
+it neither changes its starting position nor orders or repeats samples.
+Duplicates in `anchor_row_ids` are ignored. An empty selection produces an
+empty dataset. Boundary handling applies only to selected scheduled anchors.
+
+The context is planned once for the index and all requested value columns.
+Only index columns are read at construction; payloads remain lazy. All
+projections and DataLoader workers reuse that plan's split metadata and apply
+the authorization rules resolved for the complete request at construction.
+There is no per-projection full-table planning when the first batch is read.
+
+A context filter or limit that cuts an episode changes its boundaries. It
+does not automatically supply missing history or future frames. Use anchor
+selection for frame eligibility; keep complete episodes in the context when
+preserving their original boundaries and stride. Windows can still read across
+physical file/split boundaries inside those episodes. If context has already
+been divided among ranks, use a local sampler instead of sharding it again
+with a world-size `DistributedSampler`; coordinate rank step counts separately.
+
+### Search hits as training samples and window anchors
+
+On data-evolution tables, vector, full-text, and hybrid queries can directly
+call `to_torch()` or `to_contiguous_window_dataset()`. Both resolve the search
+and its post-filtered row IDs eagerly, then read training values lazily from
+that same snapshot. Reusing the query creates a new Dataset at the next
+execution's snapshot; an existing Dataset keeps its original read view.
+
+```python
+hits = (
+    frames.search(query_embedding, column="embedding", tag_name="train-v1")
+    .pre_filter("task_id = 'pick'")
+    .where("eligible = true")
+    .select(["state", "image", "action"])
+    .limit(1000)
+)
+
+# Train on the matching rows, with ordinary scan().to_torch() options.
+rows = hits.to_torch(streaming=True)
+
+# Use the matching rows as anchors while retaining their surrounding frames.
+windows = hits.to_contiguous_window_dataset(
+    context_filter="task_id = 'pick'",
+    frame_offsets={"state": [-2, -1, 0], "action": list(range(16))},
+    boundary="pad",
+)
+```
+
+For search windows, `pre_filter()`, `where()`, and `limit()` select anchors;
+they do not restrict the context or truncate its groups. The context defaults
+to the entire captured snapshot. Use `context_filter` to restrict it to complete
+episodes for the task. A selected anchor outside that context raises
+`ValueError`. The search supplies `anchor_row_ids`, so passing a separate
+selection is rejected. Stride, boundary handling, per-column offsets,
+transforms, and adapters retain the scan window semantics described above.
+
+`select()` supplies the training projection; windows can override it with
+`columns`. `to_torch()` returns rows in scan order, or in its requested shuffle
+order. Windows retain group/order and stride order. Neither conversion accepts
+`with_score()` or `order_by_score()`. Batch vector queries via `search_vectors`
+return one Dataset per input query, in input-query order, with a shared
+snapshot and context index. The context is read, validated, and sorted once
+for the batch; each Dataset keeps its own anchor selection, read cache, and
+video decoders. The search execution options `execution`, `concurrency`, and
+`ray_remote_args` match `to_arrow()`; training reads use the local PyTorch
+Dataset and its DataLoader workers. Retain the snapshot's files for the whole
+training run, for example with `tag_name="train-v1"`.
+
+### Resuming a CWD training run
+
+Install `torchdata>=0.11,<0.12` alongside your compatible PyTorch installation.
+Use `torchdata.stateful_dataloader.StatefulDataLoader` in place of `DataLoader`.
+With `shuffle=True` it uses TorchData's stateful random sampler. It records the
+batch position delivered to training, including the worker states needed to
+reconstruct prefetched batches. Do not checkpoint a sampler's current index as
+the training position: prefetch can put it ahead of completed optimizer steps.
+
+CWD implements `state_dict()` and `load_state_dict()` for this loader. Its state
+checks the table, branch, resolved snapshot, actual context/anchor index, and
+window settings. Rebuild the same dataset before loading; restoration does not
+silently switch snapshots. Retain the snapshot files with a training tag for
+as long as checkpoints may be resumed. A changed snapshot, context, anchors,
+offsets or padding raises `ValueError`, even when the sample count is unchanged.
+The index identity is cached after its first checkpoint; do not mutate dataset
+configuration or index arrays during the run.
+
+CWD also saves Python, NumPy and Torch CPU global RNG state in each process.
+Transforms and adapters with private RNGs or other mutable state must implement
+both `state_dict()` and `load_state_dict(state)`. Their state is copied before
+it is returned. Keep callback code, normalization and preprocessing settings
+unchanged; CWD cannot infer these from an arbitrary callable. Custom collators
+must be stateless apart from those global RNGs. Reader caches and video decoder
+handles are rebuilt rather than checkpointed.
+
+The training loop must save model, optimizer and loader state together, after
+an optimizer update and before fetching another batch. The following pattern
+uses `make_dataset(snapshot_id)` to rebuild your CWD with the same window and
+preprocessing arguments, via `frames.scan(snapshot_id=snapshot_id)`:
+
+```python
+import os
+import random
+
+import numpy as np
+import torch
+from torchdata.stateful_dataloader import StatefulDataLoader
+
+loader_config = dict(batch_size=32, shuffle=True, drop_last=False,
+                     num_workers=4, prefetch_factor=2,
+                     persistent_workers=True, in_order=True)
+# Include the application's preprocessing/normalization version in this contract.
+run_config = dict(loader=loader_config, preprocessing="train-v1", world_size=1,
+                  sampler="torchdata.RandomSampler", seed=42)
+generator = torch.Generator().manual_seed(42)
+# Load only trusted checkpoint files, and choose their snapshot before planning.
+saved = (torch.load(resume_path, map_location="cpu", weights_only=False)
+         if resume_path is not None else None)
+snapshot_id = saved["snapshot_id"] if saved is not None else training_snapshot_id
+dataset = make_dataset(snapshot_id)
+loader = StatefulDataLoader(dataset, generator=generator, **loader_config)
+epoch, global_step = 0, 0
+
+# Restore model/optimizer/scheduler/scaler before restoring RNGs.
+if saved is not None:
+    if saved["config"] != run_config or saved["snapshot_id"] != dataset.snapshot_id:
+        raise ValueError("Training checkpoint configuration changed")
+    model.load_state_dict(saved["model"])
+    optimizer.load_state_dict(saved["optimizer"])
+    loader.load_state_dict(saved["loader"])
+    epoch, global_step = saved["epoch"], saved["global_step"]
+
+iterator = iter(loader)  # Dataset/worker state is restored here, not at load_state_dict.
+if saved is not None:
+    # Iterator construction consumes RNG; restore these after construction.
+    generator.set_state(saved["loader_generator"])
+    random.setstate(saved["python_rng"])
+    np.random.set_state(saved["numpy_rng"])
+    torch.set_rng_state(saved["torch_rng"])
+    if saved["cuda_rng"] is not None:
+        torch.cuda.set_rng_state_all(saved["cuda_rng"])
+
+for batch in iterator:
+    optimizer.zero_grad(set_to_none=True)
+    loss = training_loss(model, batch)
+    loss.backward()
+    optimizer.step()
+    global_step += 1
+    if should_checkpoint(global_step):
+        checkpoint = dict(
+            config=run_config, snapshot_id=dataset.snapshot_id,
+            epoch=epoch, global_step=global_step,
+            model=model.state_dict(), optimizer=optimizer.state_dict(),
+            loader=loader.state_dict(), loader_generator=generator.get_state(),
+            python_rng=random.getstate(), numpy_rng=np.random.get_state(),
+            torch_rng=torch.get_rng_state(),
+            cuda_rng=torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        )
+        # Include scheduler/scaler states here when the trainer uses them.
+        torch.save(checkpoint, checkpoint_path + ".tmp")
+        os.replace(checkpoint_path + ".tmp", checkpoint_path)
+```
+
+Alternatively, use the same retained tag in `make_dataset` and verify its
+resolved ID. Move optimizer state to the training device as required by the
+trainer. The example saves inside the optimizer-step loop,
+including its last batch, before the iterator reports exhaustion. With TorchData
+0.11, saving an already exhausted iterator outside that loop is not equivalent:
+restoring it may immediately start a new epoch and consume another permutation.
+After finishing the restored suffix, start the next epoch with `iter(loader)`.
+
+Keep batch size, `drop_last`, sampler configuration, worker count, prefetch and
+persistent-worker settings unchanged, with `in_order=True`. Keep the same
+PyTorch/TorchData versions; checkpoint compatibility across versions is not
+promised. TorchData may regenerate sampling indices or replay prefetched work
+on restore; CWD does not promise constant-time recovery or zero rereads.
+
+For fixed-topology DDP, use TorchData's `StatefulDistributedSampler`, save one
+loader/generator/RNG state per rank at the same completed global step, and keep
+rank assignment and world size unchanged. Save its seed and epoch in the training
+configuration and call `sampler.set_epoch(saved_epoch)` before restoring the
+loader; the sampler's state does not itself contain the epoch. Cross-rank
+checkpoint publication, gradient-accumulation boundaries, scheduler/scaler state
+and deterministic model execution remain the trainer's responsibility.
+
+## File Format Metadata Cache
+
+Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated
+size limit in the catalog options:
+
+```python
+catalog = CatalogFactory.create({
+    "warehouse": "file:///path/to/warehouse",
+    "file-format.metadata-cache.max-size": "50 mb",
+})
+table = catalog.get_table("database.table")
+read_builder = table.new_read_builder()
+```
+
+The default limit is 50 MB; set it to `0 b` to disable and clear the cache. The
+cache is local to each process and benefits workers reused with
+`DataLoader(..., persistent_workers=True)`. The cache uses a conservative
+per-entry memory estimate and an internal entry-count safeguard; actual native
+PyArrow memory may still be higher. The cache assumes immutable Paimon data files.
+
+## Shuffle
+
+PyPaimon supports streaming shuffle for PyTorch `IterableDataset`. The shuffle
+pipeline can be composed of three layers:
+
+1. **Chunk shuffle**: split files into row chunks during scan planning and
+   shuffle the generated chunk splits. This is enabled by
+   `TableScan.with_chunk_shuffle(seed, chunk_size)`.
+2. **Split interleave**: read from multiple splits in round-robin order inside
+   each DataLoader worker.
+3. **Buffer shuffle**: apply a reservoir-style row shuffle buffer before rows
+   are yielded to PyTorch.
+
+Chunk shuffle is a scan planning feature for append tables, including
+Data Evolution append tables. For Data Evolution tables, chunk shuffle keeps
+row-id-aligned data files and sidecar files together while slicing by row-id
+range. Chunk shuffle should be used with file formats that **support random
+access**. Currently, the random-access file formats are Vortex, Row, and
+Blob. Primary-key tables and deletion-vector scans are not supported by
+`with_chunk_shuffle`.
+
+The second and third layers are Dataset features. They work on the splits you
+pass to `to_torch`, so they can be used with either normal splits or
+chunk-shuffled splits.
+
+### Use Dataset Shuffle Only
+
+Use this when normal scan splits are enough and you only want split interleave
+plus row buffer shuffle:
+
+```python
+from torch.utils.data import DataLoader
+
+table_scan = read_builder.new_scan()
+table_read = read_builder.new_read()
+splits = table_scan.plan().splits()
+
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    shuffle=True,
+    seed=42,
+    buffer_size=1000,
+    max_buffer_input_splits=10,
+)
+
+dataloader = DataLoader(
+    dataset,
+    batch_size=32,
+    num_workers=2,
+    shuffle=False,
+)
+```
+
+`buffer_size` controls the row shuffle buffer. Larger values produce a better
+approximation of global shuffle, at the cost of more memory. If
+`max_buffer_input_splits` is `1`, split interleave is skipped and only buffer
+shuffle is applied. `shuffle=True` requires `streaming=True` and does not
+support `prefetch_concurrency > 1`.
+
+### Use All Three Layers
+
+For append tables, enable chunk shuffle during scan planning, then enable
+Dataset shuffle when converting to PyTorch:
+
+```python
+from torch.utils.data import DataLoader
+
+seed = 42
+
+table_scan = read_builder.new_scan().with_chunk_shuffle(
+    seed=seed,
+    chunk_size=1000,
+)
+table_read = read_builder.new_read()
+splits = table_scan.plan().splits()
+
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    shuffle=True,
+    seed=seed,
+    buffer_size=1000,
+    max_buffer_input_splits=10,
+)
+
+dataloader = DataLoader(
+    dataset,
+    batch_size=32,
+    num_workers=2,
+    shuffle=False,
+)
+```
+
+Call `dataset.set_epoch(epoch)` before creating or iterating a DataLoader for a
+new training epoch if you want a different buffer-shuffle order for each epoch.

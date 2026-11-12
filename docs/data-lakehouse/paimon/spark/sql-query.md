@@ -1,0 +1,299 @@
+---
+title: "SQL Queries"
+sidebar_position: 4
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# SQL Queries
+
+Query Paimon tables with `SELECT` after selecting a [Paimon catalog](./catalogs).
+Choose the read scope before adding filters:
+
+| Read scope | Use it for | Entry point |
+| --- | --- | --- |
+| Latest snapshot | Current table state | [`SELECT`](#batch-query) |
+| Historical snapshot or tag | Reproduce a past table state | [Time travel](#batch-time-travel) |
+| Bounded changes | Process an interval of updates | [Batch incremental](#batch-incremental) |
+| Continuous changes | Keep consuming new commits | [Structured Streaming](./structured-streaming) |
+
+![A snapshot read returns one table state; an incremental read selects changes in a bounded interval; a streaming read continues to later snapshots.](/img/spark-read-scopes.svg)
+
+## Batch Query
+
+Paimon's batch read returns all the data in a snapshot of the table. By default, batch reads return the latest snapshot.
+
+```sql
+-- read all columns
+SELECT * FROM t;
+```
+
+Paimon also supports reading some hidden metadata columns, currently supporting the following columns:
+
+- `__paimon_partition`: The partition of the record.
+- `__paimon_bucket`: The bucket of the record.
+- `__paimon_row_index`: The row index of the record. (Available only for non-PK or deletion vector or full compacted PK table).
+- `__paimon_file_path`: The file path of the record. (Available only for non-PK or deletion vector or full compacted PK table).
+- `_ROW_ID`: The unique row id of the record (Available only for row-tracking tables).
+- `_SEQUENCE_NUMBER`: The sequence number of the record (Available only for row-tracking tables).
+
+For example:
+
+```sql
+-- read all columns and the corresponding file path, partition, bucket, rowIndex of the record
+SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
+```
+
+`__paimon_partition` is a struct containing the table's partition fields. For example,
+`SELECT __paimon_partition.dt FROM t` selects only the `dt` partition field. For chain tables,
+these values describe the returned row's logical partition, including rows retained from an older
+snapshot partition. With query authorization, partition metadata follows the same row filters,
+column permissions and column masks as the corresponding ordinary partition fields. With Spark's
+default `spark.sql.optimizer.nestedSchemaPruning.enabled=true`, selecting a single metadata subfield
+requires access to that field; selecting the complete struct requires access to all its fields.
+When this setting is `false`, Spark requests the complete partition struct even when only one
+subfield is selected, so access to all partition fields is required. Reads and column masks remain
+supported when these permissions are available. Predicates on this metadata are evaluated against
+the visible values.
+
+Supported equality, membership and range predicates on `__paimon_bucket` are pushed down to
+select physical buckets before reading data files. For example, to read only buckets 0 and 1:
+
+```sql
+SELECT * FROM t WHERE __paimon_bucket IN (0, 1);
+```
+
+Bucket IDs refer to the physical buckets of the stored files, including historical buckets
+from partitions written with a different bucket count. Other predicates can be combined with
+the bucket condition as usual. A supported bucket predicate combined with other conditions
+using `AND` can still be pushed down. An `OR` expression that mixes bucket and business
+columns, such as `__paimon_bucket = 1 OR id = 42`, is evaluated by Spark and does not itself
+enable bucket pruning. Unsupported bucket expressions, such as `__paimon_bucket % 2 = 0`,
+are also evaluated by Spark.
+
+Bucket predicate pushdown reduces the data files selected for reading. Membership and range
+predicates may still require reading manifests to identify matching files; they do not
+guarantee that manifest files are skipped.
+
+### Scan Layout and Storage Partition Joins
+
+By default, Paimon plans batch read tasks using its regular split packing. It does not report
+bucket distribution or scan ordering to Spark, so scan parallelism is not limited by the number
+of selected buckets. Spark still adds the exchanges and sorts required by the query.
+
+To let Spark use a fixed-bucket table's layout for storage partition joins or grouped aggregates,
+enable both options before planning the query:
+
+```sql
+SET spark.paimon.scan.preserve-data-grouping=true;
+SET spark.sql.sources.v2.bucketing.enabled=true;
+
+SELECT * FROM t1 JOIN t2 ON t1.bucket_key = t2.bucket_key;
+```
+
+`scan.preserve-data-grouping` defaults to `false`. It can also be set as a table property or as a
+DataFrame read option. Session and read options follow the precedence described in
+[Configuration](./configuration). The effective choice is fixed when a scan is created;
+changing a session option later affects newly created scans.
+
+In grouped mode, Paimon preserves complete splits and can provide multiple read units for the
+same bucket. Spark may group those units into one task per bucket. When a supported join uses
+`spark.sql.sources.v2.bucketing.partiallyClusteredDistribution.enabled=true`, Spark can use
+multiple tasks for a bucket. This is a join optimization; enabling grouped mode can still reduce
+the parallelism of a plain scan or TopN query.
+
+Grouped mode requires Spark 3.3 or later and a supported fixed-bucket layout. If Spark V2
+bucketing is disabled, or the scan cannot report a supported bucket layout, Paimon uses regular
+split packing. Grouping does not guarantee that every join can avoid a shuffle.
+
+**Migration:** Enabling Spark V2 bucketing alone, including its default of `true` in Spark 4.1,
+no longer opts Paimon into grouped scans. Workloads that depend on bucket distribution to avoid
+shuffles must also enable `scan.preserve-data-grouping`. The former Paimon adaptive rule that
+disabled bucket scans after physical planning has been removed;
+`spark.sql.sources.bucketing.autoBucketedScan.enabled` no longer changes a Paimon scan's layout.
+AQE and non-AQE queries use the same scan policy.
+
+### Batch Time Travel
+
+Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
+
+Requires Spark 3.3+.
+
+you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
+
+```sql
+-- read the snapshot with id 1L (use snapshot id as version)
+SELECT * FROM t VERSION AS OF 1;
+
+-- read the snapshot from specified timestamp
+SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
+
+-- read the snapshot from specified timestamp in unix seconds
+SELECT * FROM t TIMESTAMP AS OF 1678883047;
+
+-- read tag 'my-tag'
+SELECT * FROM t VERSION AS OF 'my-tag';
+
+-- read the snapshot from specified watermark. will match the first snapshot after the watermark
+SELECT * FROM t VERSION AS OF 'watermark-1678883047356';
+
+```
+
+:::warning
+
+If tag's name is a number and equals to a snapshot id, the VERSION AS OF syntax will consider tag first. For example, if
+you have a tag named '1' based on snapshot 2, the statement `SELECT * FROM t VERSION AS OF '1'` actually queries snapshot 2
+instead of snapshot 1.
+
+:::
+
+### Batch Incremental
+
+Read incremental changes between a start snapshot (exclusive) and an end snapshot (inclusive).
+
+For example:
+- '5,10' means changes between snapshot 5 and snapshot 10.
+- 'TAG1,TAG3' means changes between TAG1 and TAG3.
+
+For snapshot-ID and timestamp ranges, the default scan uses changelog files when the table
+has a changelog producer; otherwise it scans newly changed files. Tag-to-tag ranges default to
+a snapshot diff. Use `incremental-between-scan-mode` to select a supported scan mode explicitly.
+
+Paimon provides table-valued functions for incremental SQL queries. These require the
+[Paimon SQL extensions](./quick-start#setup).
+
+```sql
+-- read the incremental data between snapshot id 12 and snapshot id 20.
+SELECT * FROM paimon_incremental_query('tableName', 12, 20);
+
+-- read the incremental data between timestamps 1692169000000 and 1692169900000.
+SELECT * FROM paimon_incremental_between_timestamp('tableName', '1692169000000', '1692169900000');
+SELECT * FROM paimon_incremental_between_timestamp('tableName', '2025-03-12 00:00:00', '2025-03-12 00:08:00');
+
+-- read the incremental data to tag '2024-12-04'.
+-- Paimon will find an earlier tag and return changes between them.
+-- If the tag doesn't exist or the earlier tag doesn't exist, return empty.
+SELECT * FROM paimon_incremental_to_auto_tag('tableName', '2024-12-04');
+```
+
+In Batch SQL, the `DELETE` records are not allowed to be returned, so records of `-D` will be dropped.
+To inspect row kinds, including deletes, query the [`audit_log` system table](../concepts/system-tables#audit-log-table).
+
+## Query Optimization
+
+### Repartition Oversized Scan Output
+
+This optimization is disabled by default. Enable it for the Spark session with:
+
+```sql
+SET spark.paimon.read.repartition-large-blob-scan.enabled = true;
+```
+
+Set it to `false` to disable `RepartitionLargeBlobScan`. When disabled, the rule
+returns the plan unchanged without planning scan splits or input partitions.
+
+This rule only applies to tables whose full schema contains a `BLOB`, `ARRAY<BLOB>`,
+or `MAP<..., BLOB>` column, even if that column is pruned from the scan. Other tables
+are skipped without planning scan splits or input partitions.
+
+When an eligible Paimon batch scan has an input partition larger than twice `filesMaxPartitionBytes`,
+the optimizer inserts a shuffle immediately after the scan. The trigger threshold and
+output partition count are calculated separately:
+
+```text
+threshold = 2 * filesMaxPartitionBytes
+output partition count = ceil(total input partition bytes / filesMaxPartitionBytes)
+```
+
+If the computed output partition count is less than or equal to the existing input partition
+count, the rule keeps the scan unchanged without adding a shuffle. A shuffle is inserted only
+when the computed count increases parallelism.
+
+`filesMaxPartitionBytes` uses Paimon's `source.split.target-size`, falling back to an explicitly
+configured `spark.sql.files.maxPartitionBytes`, then Paimon's default split size.
+All input partitions contribute to the total bytes. An input partition exactly at the
+threshold does not trigger repartitioning. File-open costs and minimum partition counts
+do not affect this rule's threshold or output partition count.
+
+Sizes are the sum of data file sizes reported by the splits in each input partition,
+including Blob file sizes. They are metadata estimates, not decoded row sizes or
+measured shuffle bytes. The rule increases parallelism for downstream operators;
+it does not split source scan tasks. It leaves streaming scans and an existing
+shuffle directly above the scan unchanged. Runtime filtering can subsequently
+reduce the scan input without changing this statically planned repartition count.
+
+The shuffle is placed above an existing dynamic partition pruning filter, keeping the
+filter adjacent to its scan operation so Spark can pass runtime filters to Paimon.
+Scans below expressions using `input_file_name()`, `input_file_block_start()`, or
+`input_file_block_length()` are skipped: these functions need the source reader's
+task-local file context, which is not carried through a shuffle.
+
+### Filter Pushdown
+
+It is highly recommended to specify partition and primary key filters
+along with the query, which will speed up the data skipping of the query.
+
+The filter functions that can accelerate data skipping are:
+- `=`
+- `<`
+- `<=`
+- `>`
+- `>=`
+- `IN (...)`
+- `LIKE 'abc%'`
+- `IS NULL`
+
+Paimon will sort the data by primary key, which speeds up the point queries
+and range queries. When using a composite primary key, it is best for the query
+filters to form a [leftmost prefix](https://dev.mysql.com/doc/refman/5.7/en/multiple-column-indexes.html)
+of the primary key for good acceleration.
+
+Suppose that a table has the following specification:
+
+```sql
+CREATE TABLE orders (
+    catalog_id BIGINT,
+    order_id BIGINT,
+    amount DECIMAL(10, 2)
+) TBLPROPERTIES (
+    'primary-key' = 'catalog_id,order_id'
+);
+```
+
+The query obtains a good acceleration by specifying a range filter for
+the leftmost prefix of the primary key.
+
+```sql
+SELECT * FROM orders WHERE catalog_id=1025;
+
+SELECT * FROM orders WHERE catalog_id=1025 AND order_id=29495;
+
+SELECT * FROM orders
+  WHERE catalog_id=1025
+  AND order_id>2035 AND order_id<6000;
+```
+
+However, the following filter cannot accelerate the query well.
+
+```sql
+SELECT * FROM orders WHERE order_id=29495;
+
+SELECT * FROM orders WHERE catalog_id=1025 OR order_id=29495;
+```

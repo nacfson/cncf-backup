@@ -1,0 +1,1816 @@
+---
+description: Detailed curl examples for commonly used controller endpoints.
+---
+
+# Controller API Examples
+
+This page provides detailed `curl` request and response examples for commonly used controller endpoints. For a categorized overview of all Pinot APIs, see the main [API Reference](./).
+
+{% hint style="info" %}
+The complete and interactive list of every controller endpoint is available in the Swagger UI at `http://<controller-host>:<port>/help`. For a visual walkthrough of the Swagger UI, see [Controller Admin API](controller-admin-api.md).
+{% endhint %}
+
+## Query Validation
+
+### POST /validateMultiStageQuery
+
+Compile one or more SQL statements with the multi-stage engine without executing them. Pinot returns one validation result per input query, in the same order that the queries were submitted.
+
+Use `sql` for a single statement:
+
+```bash
+curl -X POST "http://localhost:9000/validateMultiStageQuery" \
+  -H "accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"sql":"SELECT * FROM mytable"}'
+```
+
+Use `sqls` for batch validation:
+
+```bash
+curl -X POST "http://localhost:9000/validateMultiStageQuery" \
+  -H "accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"sqls":["SELECT COUNT(*) FROM mytable","SELECT invalidColumn FROM mytable"]}'
+```
+
+**Response**
+
+```json
+[
+  {
+    "compiledSuccessfully": true,
+    "errorMessage": null,
+    "errorCode": null,
+    "sql": "SELECT * FROM mytable"
+  }
+]
+```
+
+Each response object contains:
+
+- `compiledSuccessfully`: whether Pinot compiled the query successfully
+- `errorMessage`: compiler error text on failure, otherwise `null`
+- `errorCode`: Pinot query error code on failure, otherwise `null`
+- `sql`: the input SQL string for that result
+
+For static validation, you can also send `tableConfigs` and `schemas` so the controller compiles against the provided table metadata instead of the controller's ZooKeeper-backed table cache. `logicalTableConfigs` and `ignoreCase` are also accepted for this static-cache path. When populating `tableConfigs` and `schemas`, use the same JSON objects returned by `GET /tables/{tableName}` and `GET /schemas/{schemaName}`.
+
+## SQL DDL
+
+### POST /sql/ddl
+
+Execute one controller-managed SQL DDL statement for table metadata:
+
+- `CREATE TABLE`
+- `DROP TABLE`
+- `SHOW TABLES`
+- `SHOW CREATE TABLE`
+
+Use this endpoint when you want a SQL alternative to the JSON `/schemas` and `/tables` APIs. The controller compiles DDL into the same stored `Schema` and `TableConfig` model, so `SHOW CREATE TABLE` reflects the metadata Pinot persists. Send the DDL in a JSON request body:
+
+```json
+{
+  "sql": "CREATE TABLE events (id INT DIMENSION) TABLE_TYPE = OFFLINE"
+}
+```
+
+Use a `Database` header or a SQL `db.table` qualifier to target a database. If both are present, they must agree.
+
+Use `dryRun=true` to validate without persisting:
+
+```bash
+curl -X POST "http://localhost:9000/sql/ddl?dryRun=true" \
+  -H "accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{"sql":"CREATE TABLE events (id INT DIMENSION) TABLE_TYPE = OFFLINE"}'
+```
+
+Use a regular request when you want Pinot to apply the DDL. This example scopes the request with the `Database` header:
+
+```bash
+curl -X POST "http://localhost:9000/sql/ddl" \
+  -H "accept: application/json" \
+  -H "Content-Type: application/json" \
+  -H "Database: analytics" \
+  -d '{"sql":"SHOW CREATE TABLE events TYPE OFFLINE"}'
+```
+
+**SHOW CREATE response**
+
+```json
+{
+  "operation": "SHOW_CREATE_TABLE",
+  "databaseName": "analytics",
+  "tableName": "analytics.events_OFFLINE",
+  "tableType": "OFFLINE",
+  "ddl": "CREATE TABLE analytics.events (id INT DIMENSION) TABLE_TYPE = OFFLINE",
+  "message": "Rendered canonical CREATE TABLE for analytics.events_OFFLINE."
+}
+```
+
+**CREATE dry-run response**
+
+```json
+{
+  "operation": "CREATE_TABLE",
+  "tableName": "events_OFFLINE",
+  "tableType": "OFFLINE",
+  "dryRun": true,
+  "ifNotExists": false,
+  "schema": {
+    "schemaName": "events"
+  },
+  "tableConfig": {
+    "tableName": "events_OFFLINE",
+    "tableType": "OFFLINE"
+  },
+  "message": "Dry-run succeeded for CREATE TABLE events_OFFLINE."
+}
+```
+
+The real response includes the fully resolved schema and table config objects. `warnings` appears when Pinot accepts the DDL but needs to report a non-fatal compile warning.
+
+High-level response semantics:
+
+- `201 Created` for a successful `CREATE TABLE`
+- `200 OK` for `DROP TABLE`, `SHOW TABLES`, `SHOW CREATE TABLE`, dry runs, and idempotent `IF EXISTS` or `IF NOT EXISTS` cases
+- `400 Bad Request` for parse errors, semantic validation errors, oversized SQL, type-incompatible defaults, or conflicting database references
+- `404 Not Found` for missing tables or schemas
+- `409 Conflict` for duplicate creates without `IF NOT EXISTS`, logical-table references that block a drop, or races with another writer
+
+For `CREATE TABLE` (including `dryRun=true`), a registered table-config validator that rejects the config with `ConfigValidationException` returns `400 Bad Request` with the validator's message, prefixed by `Table config validation failed:`. A rejected create does not persist the table config or schema. Unexpected validator failures still return `500 Internal Server Error`. See [Config Validator SPI](../../developers/plugin-architecture/write-custom-plugins/config-validator-spi.md) for implementing a validator.
+
+See [SQL Table DDL](../../build-with-pinot/querying-and-sql/sql-ddl.md) for syntax details and end-to-end examples.
+
+## Query Workload Propagation
+
+Use these controller endpoints to define a named query workload, inspect the per-instance budget view, and recompute propagated budgets after broker or server topology changes. For the operational model behind these APIs, see [Workload-Based Query Resource Isolation](../../operate-pinot/tuning/workload-query-isolation.md).
+
+### POST /queryWorkloadConfigs
+
+Create or update a workload definition. The controller stores the config in ZooKeeper and pushes instance-specific budgets to the relevant brokers and servers.
+
+```bash
+curl -X POST "http://localhost:9000/queryWorkloadConfigs" \
+  -H "accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "queryWorkloadName": "analytics-workload",
+    "nodeConfigs": [
+      {
+        "nodeType": "brokerNode",
+        "enforcementProfile": {
+          "cpuCostNs": 1500,
+          "memoryCostBytes": 12000
+        },
+        "propagationScheme": {
+          "propagationType": "table",
+          "propagationEntities": [
+            {
+              "entity": "myTable",
+              "cpuCostNs": 1500,
+              "memoryCostBytes": 12000
+            }
+          ]
+        }
+      },
+      {
+        "nodeType": "serverNode",
+        "enforcementProfile": {
+          "cpuCostNs": 5000,
+          "memoryCostBytes": 40000
+        },
+        "propagationScheme": {
+          "propagationType": "tenant",
+          "propagationEntities": [
+            {
+              "entity": "analyticsTenant",
+              "cpuCostNs": 5000,
+              "memoryCostBytes": 40000
+            }
+          ]
+        }
+      }
+    ]
+  }'
+```
+
+**Response**
+
+```text
+Query Workload config updated successfully for workload: analytics-workload
+```
+
+### GET /queryWorkloadConfigs/instance/{instanceName}
+
+Return the computed per-instance budgets that a specific broker or server should load. Pinot uses this endpoint during broker and server startup to fetch workload budgets asynchronously after restart.
+
+```bash
+curl -X GET "http://localhost:9000/queryWorkloadConfigs/instance/Server_localhost_8098" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "analytics-workload": {
+    "cpuCostNs": 2500,
+    "memoryCostBytes": 20000
+  }
+}
+```
+
+Pinot returns `404 Not Found` when no workload budgets currently map to the requested instance.
+
+### POST /queryWorkloadConfigs/refresh
+
+Recompute and re-push budgets for existing workload configs after a table, tenant, or workload mapping changes.
+
+Refresh by table:
+
+```bash
+curl -X POST "http://localhost:9000/queryWorkloadConfigs/refresh?resourceType=table&resourceNames=myTable_REALTIME&nodeType=serverNode" \
+  -H "accept: application/json"
+```
+
+Refresh by workload:
+
+```bash
+curl -X POST "http://localhost:9000/queryWorkloadConfigs/refresh?resourceType=workload&resourceNames=analytics-workload" \
+  -H "accept: application/json"
+```
+
+Refresh by tenant:
+
+```bash
+curl -X POST "http://localhost:9000/queryWorkloadConfigs/refresh?resourceType=tenant&resourceNames=analyticsTenant" \
+  -H "accept: application/json"
+```
+
+`resourceType` accepts `workload`, `table`, or `tenant`. The optional `nodeType` filter accepts `brokerNode` or `serverNode`.
+
+**Response**
+
+```text
+Workload propagation completed. Successful: [myTable_REALTIME], Failed: []
+```
+
+## Cluster
+
+### GET /cluster/configs
+
+List all the cluster configs. These are fetched from Zookeeper from the CONFIGS/CLUSTER/\<clusterName> znode.
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/cluster/configs" -H "accept: application/json"
+```
+
+**Response**&#x20;
+
+```
+{
+  "allowParticipantAutoJoin": "true",
+  "enable.case.insensitive": "false",
+  "pinot.broker.enable.query.limit.override": "false",
+  "default.hyperloglog.log2m": "8"
+}
+```
+
+### POST /cluster/configs
+
+Post new configs to cluster. These will get stored in the same znode as above i.e. CONFIGS/CLUSTER/\<clusterName>. These properties are appended to the existing properties if keys are new, else they will be updated if key already exists.&#x20;
+
+**Request**
+
+```
+curl -X POST "http://localhost:9000/cluster/configs" 
+-H "accept: application/json" 
+-H "Content-Type: application/json" 
+-d "{ \"pinot.helix.instance.state.maxStateTransitions\" : \"20\", \"custom.cluster.prop\": \"foo\"}"
+```
+
+**Response**&#x20;
+
+```
+{
+  "status": "Updated cluster config."
+}
+```
+
+### DELETE /cluster/configs
+
+Delete a cluster config.&#x20;
+
+**Request**
+
+```
+curl -X DELETE "http://localhost:9000/cluster/configs/custom.cluster.prop" 
+```
+
+**Response**&#x20;
+
+```
+{
+  "status": "Deleted cluster config: custom.cluster.prop"
+}
+```
+
+### Groovy static analysis configs
+
+Pinot stores Groovy static analysis settings as cluster configs. These configs are keyed by:
+
+- `pinot.groovy.all.static.analyzer`
+- `pinot.groovy.ingestion.static.analyzer`
+- `pinot.groovy.query.static.analyzer`
+
+The ingestion-specific and query-specific configs override `pinot.groovy.all.static.analyzer` for their respective contexts. `POST /cluster/configs/groovy/staticAnalyzerConfig` rejects any other top-level config key.
+
+Each config value is a JSON object with these fields:
+
+- `allowedReceivers`
+- `allowedImports`
+- `allowedStaticImports`
+- `disallowedMethodNames`
+- `methodDefinitionAllowed`
+
+### GET /cluster/configs/groovy/staticAnalyzerConfig
+
+Return the currently configured Groovy static analyzer configs, keyed by cluster config name.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/cluster/configs/groovy/staticAnalyzerConfig" -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "pinot.groovy.all.static.analyzer": {
+    "allowedReceivers": [
+      "java.lang.String",
+      "java.lang.Math",
+      "java.util.List",
+      "java.lang.Object",
+      "java.util.Map"
+    ],
+    "allowedImports": [
+      "java.lang.Math",
+      "java.util.List",
+      "java.lang.String",
+      "java.util.Map"
+    ],
+    "allowedStaticImports": [
+      "java.lang.Math",
+      "java.util.List",
+      "java.lang.String",
+      "java.util.Map"
+    ],
+    "disallowedMethodNames": [
+      "execute",
+      "invoke"
+    ],
+    "methodDefinitionAllowed": false
+  }
+}
+```
+
+### POST /cluster/configs/groovy/staticAnalyzerConfig
+
+Update one or more Groovy static analyzer configs. The request body is a map keyed by one or more of the three supported config names listed above.
+
+**Request**
+
+```bash
+curl -X POST "http://localhost:9000/cluster/configs/groovy/staticAnalyzerConfig" \
+  -H "accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pinot.groovy.ingestion.static.analyzer": {
+      "allowedReceivers": [
+        "java.lang.String",
+        "java.lang.Math",
+        "java.util.List",
+        "java.lang.Object",
+        "java.util.Map"
+      ],
+      "allowedImports": [
+        "java.lang.Math",
+        "java.util.List",
+        "java.lang.String",
+        "java.util.Map"
+      ],
+      "allowedStaticImports": [
+        "java.lang.Math",
+        "java.util.List",
+        "java.lang.String",
+        "java.util.Map"
+      ],
+      "disallowedMethodNames": [
+        "execute",
+        "invoke"
+      ],
+      "methodDefinitionAllowed": false
+    }
+  }'
+```
+
+**Response**
+
+```json
+{
+  "status": "Updated Groovy Static Analyzer config."
+}
+```
+
+### GET /cluster/configs/groovy/staticAnalyzerConfig/default
+
+Return Pinot's built-in default Groovy static analyzer config. Use this endpoint to fetch a full sample payload before editing cluster overrides.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/cluster/configs/groovy/staticAnalyzerConfig/default" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "pinot.groovy.all.static.analyzer": {
+    "allowedReceivers": [
+      "java.lang.String",
+      "java.lang.Math",
+      "java.util.List",
+      "java.lang.Object",
+      "java.util.Map"
+    ],
+    "allowedImports": [
+      "java.lang.Math",
+      "java.util.List",
+      "java.lang.String",
+      "java.util.Map"
+    ],
+    "allowedStaticImports": [
+      "java.lang.Math",
+      "java.util.List",
+      "java.lang.String",
+      "java.util.Map"
+    ],
+    "disallowedMethodNames": [
+      "execute",
+      "invoke"
+    ],
+    "methodDefinitionAllowed": false
+  }
+}
+```
+
+### GET /cluster/info
+
+Gets cluster related info, such as cluster name
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/cluster/info" -H "accept: application/json"
+```
+
+**Response**&#x20;
+
+```
+{
+  "clusterName": "QuickStartCluster"
+}
+```
+
+## Health
+
+### GET /health
+
+Check controller health. Status are OK or WebApplicationException with ServiceUnavailable and message
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/health" -H "accept: text/plain"
+```
+
+**Response**
+
+```
+OK
+```
+
+## Leader
+
+### GET /leader/tables&#x20;
+
+Gets the leader resource map, which shows the tables that are mapped to each leader.
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/leader/tables" -H "accept: application/json"
+```
+
+**Response**
+
+{% code overflow="wrap" %}
+```
+{
+  "leadControllerEntryMap": {
+    "leadControllerResource_0": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_1": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_2": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_3": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_4": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_5": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_6": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_7": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": [
+        "baseballStats_OFFLINE"
+      ]
+    },
+    "leadControllerResource_8": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": [
+        "dimBaseballTeams_OFFLINE",
+        "starbucksStores_OFFLINE"
+      ]
+    },
+    "leadControllerResource_9": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": [
+        "billing_OFFLINE"
+      ]
+    },
+    "leadControllerResource_10": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_11": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_12": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_13": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": [
+        "githubComplexTypeEvents_OFFLINE"
+      ]
+    },
+    "leadControllerResource_14": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_15": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": [
+        "githubEvents_OFFLINE"
+      ]
+    },
+    "leadControllerResource_16": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_17": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_18": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_19": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": [
+        "airlineStats_OFFLINE"
+      ]
+    },
+    "leadControllerResource_20": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_21": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_22": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    },
+    "leadControllerResource_23": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": []
+    }
+  },
+  "leadControllerResourceEnabled": true
+}
+```
+{% endcode %}
+
+### GET /leader/tables/\<tableName>
+
+Gets the leaders for the specific table
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/leader/tables/baseballStats" -H "accept: application/json"
+```
+
+**Response**
+
+```
+{
+  "leadControllerEntryMap": {
+    "leadControllerResource_7": {
+      "leadControllerId": "Controller_192.168.1.24_9000",
+      "tableNames": [
+        "baseballStats"
+      ]
+    }
+  },
+  "leadControllerResourceEnabled": true
+}
+```
+
+## Table
+
+### GET /debug/tables/\<tableName>
+
+Debug information for the table, which includes metadata and error status about segments, ingestion, servers and brokers of the table
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/debug/tables/baseballStats?type=OFFLINE&verbosity=0" -H "accept: application/json"
+```
+
+**Response**
+
+```
+[
+  {
+    "tableName": "baseballStats_OFFLINE",
+    "numSegments": 1,
+    "numServers": 1,
+    "numBrokers": 1,
+    "segmentDebugInfos": [],
+    "serverDebugInfos": [],
+    "brokerDebugInfos": [],
+    "tableSize": {
+      "reportedSize": "3 MB",
+      "estimatedSize": "3 MB"
+    },
+    "ingestionStatus": {
+      "ingestionState": "HEALTHY",
+      "errorMessage": ""
+    }
+  }
+]
+```
+
+### GET /tables/\<tableName>/size
+
+Get controller-aggregated table size details for the requested table. Pinot accepts either a raw table name such as
+`myTable` or a typed table name such as `myTable_OFFLINE`.
+
+When `tableIndexConfig.compressionStatsEnabled=true`, this response also includes a `compressionStats` summary for each
+covered offline or realtime sub-table. Per-column details are opt-in because the response can grow quickly.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `verbose` | boolean | Defaults to `true`. When `false`, Pinot still returns the table and sub-table totals but leaves the `segments` maps empty. |
+| `includeReplacedSegments` | boolean | Defaults to `true`. Include replaced segments in the size rollup. |
+| `includeColumnCompressionStats` | boolean | Defaults to `false`. Add `columnCompressionStats` to each covered sub-table and selected segment-replica entry. |
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/tables/compressionStats/size?verbose=true&includeColumnCompressionStats=true" \
+  -H "accept: application/json"
+```
+
+**Response behavior**
+
+* `offlineSegments.compressionStats` and `realtimeSegments.compressionStats` stay available even when
+  `includeColumnCompressionStats=false`.
+* `columnCompressionStats` is returned only when `includeColumnCompressionStats=true`.
+* In verbose responses, Pinot attaches segment-level compression fields to one selected replica per logical segment
+  under `segments.<segment>.serverInfo.<server>`. Other replicas continue to report disk size only.
+
+For field definitions and coverage caveats, see [Compression Stats](../../build-with-pinot/indexing/compression-stats.md).
+
+### GET /tables/\<tableName>/metadata
+
+Get aggregate segment metadata for an offline table, including optional compression summaries.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `type` | string | Use `OFFLINE`. `REALTIME` is not supported for this endpoint. |
+| `columns` | string[] | Optional repeated query parameter to limit the response to specific columns. |
+| `includeColumnCompressionStats` | boolean | Defaults to `false`. Add per-column compression entries to the response. |
+
+`compressionStatsEnabled` in the table config controls whether servers collect compression stats at all.
+`includeColumnCompressionStats` only controls whether Pinot includes the per-column list in the controller response.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/tables/compressionStats/metadata?type=OFFLINE&includeColumnCompressionStats=true" \
+  -H "accept: application/json"
+```
+
+To scope the metadata response to one column:
+
+```bash
+curl -X GET "http://localhost:9000/tables/compressionStats/metadata?type=OFFLINE&columns=message&includeColumnCompressionStats=true" \
+  -H "accept: application/json"
+```
+
+**Response behavior**
+
+* The response includes a top-level `compressionStats` summary when Pinot can read any covered segment stats.
+* `columnCompressionStats` is returned only when `includeColumnCompressionStats=true`.
+* `partialCoverage=true` means Pinot could not contribute stats for at least one logical segment, such as older
+  segments built before the flag was enabled or segments whose current replicas cannot supply stats.
+
+For field definitions and coverage caveats, see [Compression Stats](../../build-with-pinot/indexing/compression-stats.md).
+
+## Application Quotas
+
+Application-level query quotas allow you to limit the queries per second (QPS) issued by different applications connecting to Pinot, regardless of which tables or databases they query. Applications are identified by the `applicationName` query option. For more details on how application quotas interact with table and database quotas, see [Query Quotas](../../build-with-pinot/querying-and-sql/query-execution-controls/query-quotas.md).
+
+### GET /applicationQuotas
+
+Get all application QPS quotas. Returns a map of application names to their configured QPS quota values. Returns an empty map if no application quotas have been configured.
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/applicationQuotas" -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "myApp": 500.0,
+  "etlPipeline": 200.0
+}
+```
+
+### GET /applicationQuotas/\{appName\}
+
+Get the QPS quota for a specific application. If a quota has been explicitly set for the given application, that value is returned. Otherwise, the cluster-level default application quota (`applicationMaxQueriesPerSecond`) is returned. Returns `null` if neither is configured.
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/applicationQuotas/myApp" -H "accept: application/json"
+```
+
+**Response**
+
+```json
+500.0
+```
+
+### POST /applicationQuotas/\{appName\}
+
+Create or update the QPS quota for a specific application. The `maxQueriesPerSecond` query parameter specifies the new quota value. To remove a previously configured quota for an application (falling back to the cluster default), omit the `maxQueriesPerSecond` parameter or leave it empty.
+
+**Request**
+
+```
+curl -X POST "http://localhost:9000/applicationQuotas/myApp?maxQueriesPerSecond=500" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "status": "Query quota for application myApp successfully updated"
+}
+```
+
+To remove an application-specific quota:
+
+```
+curl -X POST "http://localhost:9000/applicationQuotas/myApp" \
+  -H "accept: application/json"
+```
+
+## Segments
+
+### GET /segments/\{tableName\}/invalidPartitionMetadata
+
+Return a map of segment name to raw partition metadata JSON for segments whose partition metadata is invalid.
+
+Use this endpoint when you need to find segments whose stored partition metadata cannot be trusted for partition-based routing or validation.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/segments/myTable/invalidPartitionMetadata?type=OFFLINE" \
+  -H "accept: application/json"
+```
+
+You can optionally scope the validation to a single partition column:
+
+```bash
+curl -X GET "http://localhost:9000/segments/myTable/invalidPartitionMetadata?type=OFFLINE&partitionColumn=memberId" \
+  -H "accept: application/json"
+```
+
+**Behavior**
+
+* Without `partitionColumn`, Pinot treats `null` partition metadata as valid and returns segments whose metadata is malformed or where any column maps to more than one partition.
+* With `partitionColumn`, Pinot validates only that column and treats `null` metadata, malformed metadata, missing column metadata, or multiple partitions for the column as invalid.
+
+**Response**
+
+```json
+{
+  "seg2": "{\"columnPartitionMap\":{\"memberId\":{\"functionName\":\"Modulo\",\"numPartitions\":4,\"partitions\":[0,1]}}}",
+  "seg3": "not-valid-json"
+}
+```
+
+### POST /segments/\{tableName\}/reload
+
+Submit an asynchronous reload job for every segment in a table. The controller accepts either a table name with a type suffix such as `myTable_OFFLINE`, or a raw table name such as `myTable`.
+
+Use the optional query parameters to scope the request:
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `type` | string | Optional table type filter when the path uses a raw table name. Supported values are `OFFLINE` and `REALTIME`. |
+| `forceDownload` | boolean | Re-download immutable segments from deep store before reloading. Defaults to `false`. |
+| `targetInstance` | string | Send reload messages only to a specific server instance. |
+| `instanceToSegmentsMap` | string | JSON map of server instance to segment list. When present, this overrides `targetInstance` and reloads only the listed segments on the listed servers. |
+
+When `forceDownload=true` and the path uses a raw table name without a type, Pinot restricts the reload to the `OFFLINE` table because forced deep-store download is only supported for immutable segments.
+
+**Request**
+
+```bash
+curl -X POST "http://localhost:9000/segments/myTable/reload?type=OFFLINE&forceDownload=true" \
+  -H "accept: application/json"
+```
+
+If you use `instanceToSegmentsMap`, URL-encode the JSON map and send it as a query parameter.
+
+**Response**
+
+```json
+{
+  "status": "{\"myTable_OFFLINE\":{\"numMessagesSent\":\"24\",\"reloadJobId\":\"6b2f9d35-0d3f-4ef5-91db-f77cb6fdd1c0\",\"reloadJobMetaZKStorageStatus\":\"SUCCESS\"}}"
+}
+```
+
+The `status` string is itself a JSON object keyed by table name. Each entry includes the submitted `reloadJobId`, the number of server reload messages sent, and whether Pinot persisted job metadata in ZooKeeper for later status checks.
+
+### POST /segments/\{tableName\}/\{segmentName\}/reload
+
+Submit an asynchronous reload job for a single segment. If the table path omits the type suffix, Pinot derives the table type from the segment name.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `forceDownload` | boolean | Re-download the segment from deep store before reloading. Defaults to `false`. |
+| `targetInstance` | string | Reload the segment only on a specific server instance. |
+
+**Request**
+
+```bash
+curl -X POST "http://localhost:9000/segments/myTable_OFFLINE/myTable_0/reload?targetInstance=Server_localhost_8098" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "status": "Submitted reload job id: 4f947c6f-8f51-4dbf-b4e7-a8f4f446ce88, sent 1 reload messages. Job meta ZK storage status: SUCCESS"
+}
+```
+
+### POST /segments/\{tableNameWithType\}/uploadFromServerToDeepstore
+
+Queue one or more realtime segments for upload from an online server replica into deep store. This is useful when a segment is missing from deep store or when you need to force a re-upload. The endpoint only accepts realtime tables with a type suffix such as `myTable_REALTIME`.
+
+| Query parameter | Type | Meaning |
+| --- | --- | --- |
+| `segmentNames` | string list | Segment names to upload. When omitted or empty, Pinot returns success without queueing any uploads. |
+| `forceMode` | boolean | When `false` (default), upload only when Pinot decides the deep-store copy is missing. When `true`, re-upload even if deep store already has a copy. |
+
+**Request**
+
+```bash
+curl -X POST "http://localhost:9000/segments/myTable_REALTIME/uploadFromServerToDeepstore?segmentNames=myTable__0__0__20251120T0000Z&segmentNames=myTable__1__0__20251120T0000Z&forceMode=true" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "status": "Successfully queued 2 segment(s) for force upload to deep store for table: myTable_REALTIME"
+}
+```
+
+If the table is not realtime, Pinot returns `400 Bad Request`. If named segments are missing from ZooKeeper metadata, Pinot skips them and only queues the segments it can resolve. When no segments remain after resolution, Pinot returns a success response saying there are no segments to upload.
+
+### POST /segments/reingested
+
+Finalize a reingested realtime segment upload. Pinot uses this endpoint during pauseless disaster recovery after a server has rebuilt a failed LLC segment and uploaded the segment tarball into the segment store.
+
+This endpoint only accepts realtime-table uploads in metadata mode. Operators usually do not call it directly; the server's reingestion flow calls it after `POST /reingestSegment/{segmentName}` finishes rebuilding the segment.
+
+| Query parameter | Type | Meaning |
+| --- | --- | --- |
+| `tableName` | string | Required raw table name. Pinot resolves the realtime table internally. |
+
+| Required header | Value |
+| --- | --- |
+| `UPLOAD_TYPE` | `METADATA` |
+| `DOWNLOAD_URI` | URI of the reingested segment tarball already copied to the segment store |
+| `COPY_SEGMENT_TO_DEEP_STORE` | `true` |
+
+**Request**
+
+```bash
+curl -X POST "http://localhost:9000/segments/reingested?tableName=myTable" \
+  -H "UPLOAD_TYPE: METADATA" \
+  -H "DOWNLOAD_URI: s3://my-bucket/myTable/myTable__0__17__20250320T1530Z.tmp.tar.gz" \
+  -H "COPY_SEGMENT_TO_DEEP_STORE: true" \
+  -F "file=@myTable__0__17__20250320T1530Z.metadata.tar.gz"
+```
+
+The multipart body contains one segment metadata tarball. Pinot reads the segment metadata from that tarball, updates the download URI, and marks the realtime segment as complete.
+
+**Response**
+
+```json
+{
+  "status": "Successfully uploaded reingested segment: myTable__0__17__20250320T1530Z of table: myTable_REALTIME"
+}
+```
+
+### DELETE /deleteSegmentsFromSequenceNum/\{tableNameWithType\}
+
+Delete a contiguous tail of LLC segments per partition for a pauseless realtime table. For each input segment, Pinot finds that segment's partition and deletes every segment in the same partition whose sequence number is greater than or equal to the oldest supplied segment for that partition.
+
+Use this endpoint during manual pauseless recovery when a failed segment build or upload left later segments inconsistent and you need Pinot to recreate them from the stream.
+
+| Query parameter | Type | Meaning |
+| --- | --- | --- |
+| `segments` | string list | Required LLC segment names. Pinot treats the oldest supplied segment in each partition as the deletion starting point. |
+| `dryRun` | boolean | When `true`, Pinot returns the per-partition deletion plan without deleting anything. When `false`, Pinot performs the deletion. |
+| `force` | boolean | When `false`, Pinot requires the table to be realtime, pauseless-enabled, and currently paused. When `true`, Pinot bypasses the pauseless-enabled and paused-state checks. |
+
+**Request**
+
+Preview the deletion plan first:
+
+```bash
+curl -X DELETE "http://localhost:9000/deleteSegmentsFromSequenceNum/myTable_REALTIME?segments=myTable__0__17__20250320T1530Z&dryRun=true" \
+  -H "accept: application/json"
+```
+
+Apply the deletion after you have paused ingestion and verified the target partitions:
+
+```bash
+curl -X DELETE "http://localhost:9000/deleteSegmentsFromSequenceNum/myTable_REALTIME?segments=myTable__0__17__20250320T1530Z&dryRun=false" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "tableName": "myTable_REALTIME",
+  "dryRun": true,
+  "partitions": {
+    "0": {
+      "segmentsToDelete": [
+        "myTable__0__17__20250320T1530Z",
+        "myTable__0__18__20250320T1540Z"
+      ],
+      "oldestSegment": "myTable__0__17__20250320T1530Z",
+      "latestSegment": "myTable__0__18__20250320T1540Z",
+      "segmentCount": 2
+    }
+  },
+  "message": "Dry run completed. Segments identified for deletion but not actually deleted."
+}
+```
+
+Pinot skips segment names that are no longer present in the ideal state. For operational safety, run the endpoint once with `dryRun=true` and only rerun with `dryRun=false` after you verify the per-partition segment list.
+
+### GET /segments/segmentReloadStatus/\{jobId\}
+
+Fetch the current status for a previously submitted reload job.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/segments/segmentReloadStatus/6b2f9d35-0d3f-4ef5-91db-f77cb6fdd1c0" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "status": "IN_PROGRESS",
+  "timeElapsedInMinutes": 0.6,
+  "estimatedTimeRemainingInMinutes": 1.4,
+  "totalSegmentCount": 24,
+  "successCount": 10,
+  "totalServersQueried": 6,
+  "totalServerCallsFailed": 0,
+  "failureCount": 0,
+  "metadata": {
+    "jobId": "6b2f9d35-0d3f-4ef5-91db-f77cb6fdd1c0"
+  },
+  "segmentReloadFailures": []
+}
+```
+
+The typed response tracks overall progress, estimated completion time, job metadata, and any per-segment failures Pinot has collected so far.
+
+### GET /segments/\{tableNameWithType\}/needReload
+
+Ask every server hosting a typed table whether any of its segments need a reload. This endpoint requires a table name with type suffix such as `myTable_OFFLINE` or `myTable_REALTIME`.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `verbose` | boolean | Include per-server reload decisions in the response. Defaults to `false`. |
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/segments/myTable_OFFLINE/needReload?verbose=true" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "needReload": true,
+  "serverToSegmentsCheckReloadList": {
+    "instance123": {
+      "needReload": true,
+      "instanceId": "instance123"
+    }
+  }
+}
+```
+
+Without `verbose=true`, Pinot still returns the top-level `needReload` flag but leaves `serverToSegmentsCheckReloadList` empty.
+
+### PUT /tables/\<tableName>
+
+Update the config for an existing typed table.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `validationTypesToSkip` | string | Comma-separated validation types to skip during table-config validation. |
+| `force` | boolean | Defaults to `false`. When `true`, Pinot still applies backward-incompatible upsert or dedup config changes that it would otherwise reject. Use only for controlled migrations. |
+
+`validationTypesToSkip` accepts `ALL`, `TASK`, `UPSERT`, `DEDUP`, `INSTANCE_ASSIGNMENT`, `TENANT` and `MINION_INSTANCES`. Names are case-insensitive and whitespace around comma-separated names is ignored; an omitted or blank parameter skips nothing. Unknown names, including `ACTIVE_TASKS`, return `400 Bad Request`. These parsing rules also apply to table-config validation and tuning endpoints. `TENANT` and `MINION_INSTANCES` can be skipped for validation/tuning only: table creation and update always validate them, even with `ALL`. Skipping `UPSERT` alone does not skip `DEDUP` validation.
+
+By default, Pinot returns `400 Bad Request` for backward-incompatible changes on existing upsert or dedup tables. The protected fields include upsert comparison columns, hash function, mode, `deleteRecordColumn`, out-of-order settings, dedup hash function, dedup time column, and the table time column when Pinot is using it as the default comparison or dedup time column. The safest path for those changes is still to create a new table and reingest the data.
+
+For existing `PARTIAL` upsert tables, Pinot now allows `partialUpsertStrategies` and `defaultPartialUpsertStrategy` to change without `force=true`. The new strategy is not retroactive: existing merged values stay as stored, and the new behavior takes effect only after each consuming server restarts and reloads the table config. During a rolling restart, replicas can temporarily diverge on rows ingested during the rollout window; if that happens, reset the affected consuming segments after the rollout.
+
+**Request**
+
+```bash
+curl -X PUT "http://localhost:9000/tables/myTable_REALTIME?force=true" \
+  -H "Content-Type: application/json" \
+  -d @table-config.json
+```
+
+**Response**
+
+```json
+{
+  "status": "Table config updated for myTable_REALTIME"
+}
+```
+
+### PUT /tableConfigs/\<tableName>
+
+Update a combined `TableConfigs` payload for the raw table name. Pinot uses this endpoint when you want to update schema-linked offline and realtime table configs together.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `validationTypesToSkip` | string | Comma-separated validation types to skip during validation. |
+| `reload` | boolean | Defaults to `false`. When `true`, Pinot reloads the table if the schema update is backward compatible. |
+| `forceTableSchemaUpdate` | boolean | Defaults to `false`. When `true`, Pinot forces both the schema update and the included table-config updates even when they would normally be rejected as backward incompatible. This is intended for exceptional cases and should be used with caution. |
+
+The same upsert and dedup compatibility checks described above apply to the realtime or offline configs inside the `TableConfigs` payload. Without `forceTableSchemaUpdate=true`, Pinot rejects those backward-incompatible changes with `400 Bad Request`.
+
+As with `PUT /tables/{tableName}`, Pinot allows `partialUpsertStrategies` and `defaultPartialUpsertStrategy` updates for existing `PARTIAL` upsert tables without `forceTableSchemaUpdate=true`, subject to the same restart and potential segment-reset caveats.
+
+**Request**
+
+```bash
+curl -X PUT "http://localhost:9000/tableConfigs/myTable?forceTableSchemaUpdate=true" \
+  -H "Content-Type: application/json" \
+  -d @table-configs.json
+```
+
+**Response**
+
+```json
+{
+  "status": "TableConfigs updated for myTable"
+}
+```
+
+
+### DELETE /tables/\<tableName>
+
+Deletes a table from the cluster. By default, deleted segments are moved to a _Deleted Segments_ area and retained for a configurable period (controlled by `controller.deleted.segments.retentionInDays`, default 7 days) before being permanently removed. This allows recovery if the deletion was accidental.
+
+You can override this behavior by passing the `retention` query parameter to specify a custom retention period for the deleted segments. Setting `retention=0d` deletes segments immediately, bypassing the default retention period entirely.
+
+**Query Parameters**
+
+| Parameter  | Type   | Required | Description                                                                                                              |
+| ---------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `type`     | string | No       | Table type (`OFFLINE` or `REALTIME`). If not specified, both types are deleted if they exist.                             |
+| `retention`| string | No       | Retention period for deleted segments (e.g., `0d` for immediate deletion, `1d` for one day). Overrides the cluster default. |
+
+**Request (default behavior)**
+
+```
+curl -X DELETE "http://localhost:9000/tables/baseballStats" -H "accept: application/json"
+```
+
+**Request (immediate deletion)**
+
+```
+curl -X DELETE "http://localhost:9000/tables/baseballStats?retention=0d" -H "accept: application/json"
+```
+
+**Response**
+
+```
+{
+  "status": "Tables: [baseballStats_OFFLINE] deleted"
+}
+```
+
+{% hint style="warning" %}
+Setting `retention=0d` permanently deletes all segments immediately with no possibility of recovery. Use this option only when you are certain the data is no longer needed, such as during development, testing, or cleaning up temporary tables.
+{% endhint %}
+
+{% hint style="info" %}
+For large tables, the default delete operation may time out because it copies segments to the deleted-segments area. Using `retention=0d` bypasses this copy step, which can help avoid timeouts.
+{% endhint %}
+
+### DELETE /schemas/\<schemaName>
+
+Deletes a schema from the cluster. A schema can only be deleted if no tables are currently using it. If a table still references the schema, the delete request will fail.
+
+To delete both a table and its schema in a single workflow, first delete the table using `DELETE /tables/<tableName>`, then delete the schema using this endpoint.
+
+**Request**
+
+```
+curl -X DELETE "http://localhost:9000/schemas/baseballStats" -H "accept: application/json"
+```
+
+**Response**
+
+```
+{
+  "status": "Schema baseballStats deleted"
+}
+```
+
+{% hint style="info" %}
+In the Pinot Data Explorer UI, you can delete both the table and its schema together by checking the **Delete Schema** option in the delete table dialog. The UI will delete the table first and then automatically delete the associated schema.
+{% endhint %}
+
+## Table Config Validation
+
+{% hint style="info" %}
+Enhanced in Pinot 1.4.0 with cluster-aware validations (see [PR #16675](https://github.com/apache/pinot/pull/16675))
+{% endhint %}
+
+### POST /tableConfigs/validate
+
+Validates a table configuration before you create or update a table. This endpoint now performs cluster-aware validations by default, catching errors like missing tenant tags or unavailable minion instances that previously only surfaced during table creation.
+
+The endpoint checks:
+- Schema and table config consistency
+- Tenant assignment validity (do instances with the required tags exist?)
+- Minion instance availability (if task configs reference minion)
+- Registered `TableConfigValidator` SPI implementations
+
+The read-only `validate` and `tune` preflight endpoints do not validate active tasks. You can use them for an
+existing table that has tasks running; active-task validation remains part of the mutating table-management paths.
+
+**Request**
+
+```
+curl -X POST "http://localhost:9000/tableConfigs/validate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tableName": "myTable",
+    "tableType": "OFFLINE",
+    "segmentsConfig": { ... },
+    "tenants": {
+      "broker": "DefaultTenant",
+      "server": "DefaultTenant"
+    },
+    "tableIndexConfig": { ... },
+    ...
+  }'
+```
+
+**Parameters**
+
+| Parameter                  | Type  | Description                                                                 |
+| -------------------------- | ----- | --------------------------------------------------------------------------- |
+| `validationTypesToSkip`    | query | Comma-separated list of validation types to skip (e.g., `TENANT,MINION_INSTANCES`) |
+
+The supported validation types that can be skipped are: `ALL`, `TASK`, `UPSERT`, `TENANT`, and `MINION_INSTANCES`.
+
+### POST /tables/validate
+
+Validates one table config in the same shape returned by `GET /tables/{tableName}`. This endpoint runs the built-in table, schema, and task checks and every registered `TableConfigValidator` SPI implementation, matching the validation performed when Pinot applies the config.
+
+```bash
+curl -X POST "http://localhost:9000/tables/validate" \
+  -H "Content-Type: application/json" \
+  -d @table-config.json
+```
+
+The table and its schema must already exist. Pinot returns the validated config under its `OFFLINE` or `REALTIME` key and includes any unrecognized input properties in `unrecognizedProperties`. A custom validator rejection returns `400 Bad Request`, allowing clients to catch it before an update request.
+Unknown validation type names, including `ACTIVE_TASKS`, return `400 Bad Request`.
+
+**Response**
+
+On success, returns the validated config. On failure, returns an error message describing the validation issue.
+
+```
+{
+  "unrecognizedProperties": {},
+  "tableConfig": { ... },
+  "schema": { ... }
+}
+```
+
+### POST /tableConfigs/tune
+
+Validates a combined `TableConfigs` payload and returns the tuned version that Pinot would store on table create or update. Send the raw `tableName`, the `schema`, and at least one of `offline` or `realtime`. Pinot validates the payload first; if validation succeeds, it applies tuner configs and then enforces minimum replica and storage quota constraints on each included table config before returning the tuned `TableConfigs`.
+
+**Parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `validationTypesToSkip` | query | Optional comma-separated validation types to skip during validation: `ALL`, `TASK`, `UPSERT`, `DEDUP`, `INSTANCE_ASSIGNMENT`, `TENANT`, `MINION_INSTANCES`. |
+
+Unknown validation type names, including `ACTIVE_TASKS`, return `400 Bad Request`.
+
+**Request**
+
+```bash
+curl -X POST "http://localhost:9000/tableConfigs/tune?validationTypesToSkip=TENANT,MINION_INSTANCES" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tableName": "myTable",
+    "schema": { ... },
+    "offline": { ... },
+    "realtime": { ... }
+  }'
+```
+
+You can omit either `offline` or `realtime` when tuning a single typed table config, but Pinot still requires `schema` and at least one table config in the request body.
+
+**Response**
+
+On success, Pinot returns the tuned `TableConfigs` payload together with `unrecognizedProperties`, which lists any JSON paths Pinot ignored while parsing.
+
+```json
+{
+  "tableName": "myTable",
+  "schema": { ... },
+  "offline": { ... },
+  "realtime": { ... },
+  "unrecognizedProperties": {}
+}
+```
+
+## Minion Task APIs
+
+### GET /tasks/\<taskType>/taskcounts
+
+Returns a map from parent task name to aggregated subtask counts for the given minion task type.
+
+**Query Parameters**
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `state` | string | No | Filter by one or more comma-separated Helix task states such as `IN_PROGRESS`, `FAILED`, or `COMPLETED`. The filter applies to the parent task state, not to the per-subtask counters returned in the response. |
+| `table` | string | No | Filter to parent tasks that have at least one subtask for the specified table name with type, such as `myTable_OFFLINE`. |
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/tasks/SegmentGenerationAndPushTask/taskcounts?state=IN_PROGRESS,FAILED&table=myTable_OFFLINE" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "Task_SegmentGenerationAndPushTask_12345": {
+    "total": 4,
+    "completed": 1,
+    "running": 2,
+    "waiting": 0,
+    "error": 1,
+    "unknown": 0,
+    "dropped": 0,
+    "timedOut": 0,
+    "aborted": 0
+  }
+}
+```
+
+Each response value is a subtask-count summary for one parent task. The counters represent the number of subtasks in each result bucket, while `state` only controls which parent tasks are included in the map.
+
+## Logical Table Management
+
+{% hint style="info" %}
+Added in Pinot 1.4.0
+{% endhint %}
+
+Logical tables provide a unified view over multiple physical tables (REALTIME and OFFLINE). A query against a logical table internally scans all of its underlying physical tables, similar to a SQL VIEW with UNION semantics. This is useful for scaling large tables, performing ALTER TABLE workflows like Kafka topic reconfiguration, and managing time-based data layouts.
+
+### GET /logicalTables
+
+List all logical table names in the cluster.
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/logicalTables" -H "accept: application/json"
+```
+
+**Response**
+
+```
+["logicalEvents", "logicalOrders"]
+```
+
+### GET /logicalTables/\<tableName>
+
+Get the configuration of a specific logical table. The response body is the logical table config JSON.
+
+**Request**
+
+```
+curl -X GET "http://localhost:9000/logicalTables/logicalEvents" -H "accept: application/json"
+```
+
+**Response**
+
+```
+{
+  "tableName": "logicalEvents",
+  "physicalTableConfigMap": {
+    "events_2024_OFFLINE": {},
+    "events_2023_OFFLINE": {}
+  },
+  "brokerTenant": "DefaultTenant",
+  "refOfflineTableName": "events_2024_OFFLINE"
+}
+```
+
+### POST /logicalTables
+
+Create a new logical table. The request body is a logical table config. The physical tables referenced must already exist, and all physical tables must share a compatible schema.
+
+**Request**
+
+```
+curl -X POST "http://localhost:9000/logicalTables" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tableName": "logicalEvents",
+    "physicalTableConfigMap": {
+      "events_REALTIME": {},
+      "events_2024_OFFLINE": {}
+    },
+    "brokerTenant": "DefaultTenant",
+    "refOfflineTableName": "events_2024_OFFLINE",
+    "refRealtimeTableName": "events_REALTIME",
+    "timeBoundaryConfig": {
+      "boundaryStrategy": "min",
+      "parameters": {
+        "includedTables": ["events_2024_OFFLINE"]
+      }
+    }
+  }'
+```
+
+**Response**
+
+```
+{
+  "status": "Successfully created logical table: logicalEvents"
+}
+```
+
+### PUT /logicalTables/\<tableName>
+
+Update an existing logical table by sending the full logical table config, for example to add or remove physical tables.
+
+**Request**
+
+```
+curl -X PUT "http://localhost:9000/logicalTables/logicalEvents" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tableName": "logicalEvents",
+    "physicalTableConfigMap": {
+      "events_REALTIME": {},
+      "events_2024_OFFLINE": {},
+      "events_2023_OFFLINE": {}
+    },
+    "brokerTenant": "DefaultTenant",
+    "refOfflineTableName": "events_2024_OFFLINE",
+    "refRealtimeTableName": "events_REALTIME",
+    "timeBoundaryConfig": {
+      "boundaryStrategy": "min",
+      "parameters": {
+        "includedTables": ["events_2024_OFFLINE"]
+      }
+    }
+  }'
+```
+
+**Response**
+
+```
+{
+  "status": "Successfully updated logical table: logicalEvents"
+}
+```
+
+### DELETE /logicalTables/\<tableName>
+
+Delete a logical table. This does not delete the underlying physical tables.
+
+**Request**
+
+```
+curl -X DELETE "http://localhost:9000/logicalTables/logicalEvents" -H "accept: application/json"
+```
+
+**Response**
+
+```
+{
+  "status": "Successfully deleted logical table: logicalEvents"
+}
+```
+
+
+## Rebalance
+
+{% hint style="info" %}
+Enhanced in Pinot 1.4.0 with dry-run summary mode, pre-checks, and disk utilization info
+{% endhint %}
+
+### POST /tables/\<tableName>/rebalance
+
+Trigger a rebalance for a table. In 1.4.0, this API gained several new capabilities:
+
+- **Dry-run summary mode**: Pass `dryRun=true` to get a summary of what the rebalance would do without making any changes.
+- **Pre-checks**: Pass `preChecks=true` to run validation checks (replica group info, disk utilization) before executing the rebalance.
+- **Disk utilization threshold override**: Use `diskUtilizationThresholdOverride` to customize the threshold for the disk utilization pre-check.
+- **Tenant info**: The rebalance response now includes tenant information.
+- **minimizeDataMovement**: Pass `minimizeDataMovement=true` to reduce the amount of data moved during the rebalance.
+
+{% hint style="warning" %}
+**Nullable Response Fields**: Some fields in the RebalanceResult API response may be `null` depending on the table type (offline vs realtime) and the rebalance configuration options used. When checking rebalance results programmatically, always null-check response fields before using them.
+{% endhint %}
+
+**Request**
+
+```
+curl -X POST "http://localhost:9000/tables/myTable/rebalance?type=OFFLINE&dryRun=true&preChecks=true" \
+  -H "accept: application/json"
+```
+
+## Ingestion
+
+### POST /tables/\<tableName>/pauseConsumption
+
+Pause real-time consumption for a table.
+
+| Query parameter | Type | Meaning |
+| --- | --- | --- |
+| `comment` | string | Optional comment stored with the administrative pause state. |
+| `batchSize` | integer | Maximum number of consuming segments Pinot commits at once while pausing. Defaults to queueing all consuming segments in one batch. |
+| `batchStatusCheckIntervalSec` | integer | How often, in seconds, the controller checks whether the current pause batch has finished committing. Default: `5`. |
+| `batchStatusCheckTimeoutSec` | integer | How long, in seconds, the controller waits for a pause batch to finish before failing the request. Default: `180`. |
+
+For realtime tables with many partitions, use the batch parameters to spread the commit work across smaller pause batches instead of asking every consuming segment to commit at once. Pinot returns `400 Bad Request` if any batch parameter is non-positive.
+
+**Request**
+
+```
+curl -X POST "http://localhost:9000/tables/myTable/pauseConsumption" -H "accept: application/json"
+```
+
+Example with batching:
+
+```bash
+curl -X POST "http://localhost:9000/tables/myTable/pauseConsumption?comment=maintenance&batchSize=50&batchStatusCheckIntervalSec=5&batchStatusCheckTimeoutSec=180" \
+  -H "accept: application/json"
+```
+
+### POST /tables/\<tableName>/resumeConsumption
+
+Resume real-time consumption for a table.
+
+| Query parameter | Type | Meaning |
+| --- | --- | --- |
+| `comment` | string | Optional comment stored with the administrative resume state. |
+| `consumeFrom` | string | Optional resume offset policy. Use `lastConsumed` to continue from the offsets stored in Pinot metadata, `smallest` to restart from the earliest available offsets, or `largest` to restart from the latest available offsets. Default: `lastConsumed`. |
+
+**Request**
+
+```
+curl -X POST "http://localhost:9000/tables/myTable/resumeConsumption" -H "accept: application/json"
+```
+
+Example with an administrative comment and an explicit resume policy:
+
+```bash
+curl -X POST "http://localhost:9000/tables/myTable/resumeConsumption?comment=maintenance-complete&consumeFrom=smallest" \
+  -H "accept: application/json"
+```
+
+### GET /tables/\<tableName>/pauseStatus
+
+Return the current pause state for a realtime table together with the currently consuming segments.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/tables/myTable/pauseStatus" -H "accept: application/json"
+```
+
+**Response fields**
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `pauseFlag` | boolean | Whether Pinot currently considers the realtime table paused. |
+| `consumingSegments` | array of strings | Segment names that are still in the consuming state when the status is fetched. |
+| `reasonCode` | string | Pause reason code, such as `ADMINISTRATIVE` for operator-driven pauses or `STORAGE_QUOTA_EXCEEDED` for automatic storage-quota pauses. |
+| `comment` | string | Stored administrative or automatic pause comment. If no explicit comment was stored, Pinot returns a default paused or unpaused message. |
+| `timestamp` | string | Stored pause-state timestamp from the controller metadata. |
+| `indexOfInactiveTopics` | array of integers | Zero-based topic indexes that remain paused after topic-level pause operations. Pinot omits this field when no individual topics are paused. |
+
+**Example response**
+
+```json
+{
+  "pauseFlag": true,
+  "consumingSegments": [
+    "myTable__0__12__20250610T2140Z",
+    "myTable__1__12__20250610T2140Z"
+  ],
+  "reasonCode": "ADMINISTRATIVE",
+  "comment": "maintenance",
+  "timestamp": "<stored pause-state timestamp>",
+  "indexOfInactiveTopics": [0, 1]
+}
+```
+
+### POST /tables/\<tableName>/forceCommit
+
+Force the current **CONSUMING** segments of a realtime table to commit immediately and start new consuming segments. Use this after compatible schema or table-config changes so the next consuming segments pick up the new settings, or before a rebalance when you want consuming segments sealed first.
+
+{% hint style="warning" %}
+**HTTP 200 means the request was accepted**, not that every segment has finished committing. Force commit is asynchronous. Use [GET /tables/forceCommitStatus/\{jobId\}](#get-tablesforcecommitstatusjobid) to track progress.
+{% endhint %}
+
+| Query parameter | Type | Meaning |
+| --- | --- | --- |
+| `partitions` | string | Optional comma-separated partition group IDs. Only consuming segments for those partitions are force-committed. |
+| `segments` | string | Optional comma-separated consuming segment names. Only those segments are force-committed (non-consuming names are ignored with a warning in controller logs). |
+| `batchSize` | integer | Maximum number of consuming segments to commit per batch. Default: all target segments in one batch (`Integer.MAX_VALUE`). Must be > `0`. |
+| `batchStatusCheckIntervalSec` | integer | How often, in seconds, the controller checks whether the current batch has finished before starting the next batch. Default: `5`. Must be > `0`. |
+| `batchStatusCheckTimeoutSec` | integer | How long, in seconds, the controller waits for a batch to finish before failing the in-progress batch wait. Default: `180`. Must be > `0`. |
+
+**Mutual exclusion:** do **not** pass `partitions` and `segments` together. Pinot returns `400 Bad Request` with `Cannot specify both partitions and segments to commit`.
+
+When neither filter is set, Pinot force-commits **all** consuming segments for the table. With `batchSize` smaller than the number of targets, the controller commits segments in sequential batches (spread across servers) and waits for each batch using the interval/timeout above. That batch wait runs **asynchronously after** the HTTP accept (on a background executor); the POST still returns immediately with a `forceCommitJobId` — use forceCommitStatus to observe completion.
+
+**Request**
+
+```bash
+curl -X POST "http://localhost:9000/tables/myTable/forceCommit" -H "accept: application/json"
+```
+
+Partition filter:
+
+```bash
+curl -X POST "http://localhost:9000/tables/myTable/forceCommit?partitions=0,1,2" \
+  -H "accept: application/json"
+```
+
+Segment filter with batching:
+
+```bash
+curl -X POST "http://localhost:9000/tables/myTable/forceCommit?segments=myTable__0__12__20250610T2140Z,myTable__1__12__20250610T2140Z&batchSize=50&batchStatusCheckIntervalSec=5&batchStatusCheckTimeoutSec=180" \
+  -H "accept: application/json"
+```
+
+**Success response fields**
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `forceCommitStatus` | string | `SUCCESS` when the controller successfully initiated force commit (messages sent / batches scheduled). Does **not** mean all segments are already ONLINE. |
+| `jobMetaZKWriteStatus` | string | `SUCCESS` if Pinot wrote force-commit job metadata to ZooKeeper; `FAILED` if commit was initiated but the ZK job record could not be stored (you will not get a trackable `forceCommitJobId`). |
+| `forceCommitJobId` | string | UUID used with the status API. Present only when `jobMetaZKWriteStatus` is `SUCCESS`. |
+
+**Example response**
+
+```json
+{
+  "forceCommitJobId": "6757284f-b75b-45ce-91d8-a277bdbc06ae",
+  "forceCommitStatus": "SUCCESS",
+  "jobMetaZKWriteStatus": "SUCCESS"
+}
+```
+
+**Failure modes**
+
+| Situation | Typical HTTP status | Notes |
+| --- | --- | --- |
+| Table missing or no IdealState | `404` | `Table {name}_REALTIME not found!` |
+| Table disabled | `400` | Table exists but is disabled. |
+| Both `partitions` and `segments` set | `400` | Conflicting filters. |
+| Non-positive `batchSize` / interval / timeout | `400` | `Invalid batch config`. |
+| Partial-upsert tables, or upsert tables with out-of-order drop/column settings, when cluster consistency mode disallows force commit | `500` | Controller rejects force commit to avoid inconsistent upsert metadata unless `pinot.server.consuming.segment.consistency.mode` allows it (for example `PROTECTED`). |
+| No force-commit message could be sent | `500` | Internal error from the realtime segment manager. |
+| ZK job metadata write fails | `200` with `jobMetaZKWriteStatus=FAILED` | Commit may still be in flight; progress tracking via job id is unavailable. |
+
+Force commit is a one-shot request (not auto-retried). It is idempotent enough that you can re-issue it if needed. It triggers the same commit path as a normal end-of-segment commit, just earlier than the rows/time thresholds.
+
+For operational context (pause/resume interaction, schema evolution), see [Pause stream ingestion](../../build-with-pinot/ingestion/stream-ingestion/README.md#pause-stream-ingestion) and [Schema evolution](../../build-with-pinot/data-modeling/schema-evolution.md).
+
+### GET /tables/forceCommitStatus/\{jobId\}
+
+Return progress for a force-commit job previously accepted by `POST /tables/{tableName}/forceCommit`.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/tables/forceCommitStatus/6757284f-b75b-45ce-91d8-a277bdbc06ae" \
+  -H "accept: application/json"
+```
+
+**Response fields**
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `jobId` | string | Force-commit job UUID. |
+| `tableName` | string | Realtime table name with type (for example `myTable_REALTIME`). |
+| `jobType` | string | `FORCE_COMMIT`. |
+| `submissionTimeMs` | string | Epoch millis when the controller accepted the job. |
+| `segmentsForceCommitted` | string (JSON array) | Snapshot of consuming segment names for which commit was **initiated** at submission time. |
+| `segmentsYetToBeCommitted` | array of strings | Subset of the tracked segments that are **still** pending commit when you poll. Empty means all tracked segments have left the pending set. |
+| `numberOfSegmentsYetToBeCommitted` | integer | Count of `segmentsYetToBeCommitted`. Use this as the primary progress signal (`0` ≈ complete for the segments this job tracks). |
+
+**How pending is computed:** the controller compares the job's segment list with the current IdealState / segment metadata. Segments that have not yet finished committing remain in `segmentsYetToBeCommitted`. Successful polls may persist an updated pending list back to ZK.
+
+{% hint style="info" %}
+Job metadata is **not** deleted when the commit finishes. Entries can look stale if you inspect them long after completion. Pinot retains a bounded number of force-commit job records in ZK (default **100**, controlled by `controller.force.commit.maxJobsInZK`); older entries are evicted when the limit would be exceeded.
+{% endhint %}
+
+**Example response (in progress)**
+
+```json
+{
+  "jobId": "6757284f-b75b-45ce-91d8-a277bdbc06ae",
+  "segmentsForceCommitted": "[\"myTable__0__12__20250610T2140Z\",\"myTable__1__12__20250610T2140Z\"]",
+  "submissionTimeMs": "1674111682977",
+  "numberOfSegmentsYetToBeCommitted": 1,
+  "jobType": "FORCE_COMMIT",
+  "segmentsYetToBeCommitted": ["myTable__1__12__20250610T2140Z"],
+  "tableName": "myTable_REALTIME"
+}
+```
+
+**Failure modes**
+
+| Situation | Typical HTTP status | Notes |
+| --- | --- | --- |
+| Unknown `jobId` | `404` | `Failed to find controller job id: ...` (never written, already evicted, or ZK write failed at submit time). |
+
+### GET /tables/\<tableName>/badLLCSegmentsPerPartition
+
+Return the bad LLC segments for a realtime table, grouped by partition ID. Pinot sorts the segment names within each partition by increasing sequence number, which makes this endpoint useful before calling repair workflows such as `deleteSegmentsFromSequenceNum`.
+
+**Request**
+
+```bash
+curl -X GET "http://localhost:9000/tables/myTable/badLLCSegmentsPerPartition" \
+  -H "accept: application/json"
+```
+
+**Response**
+
+```json
+{
+  "0": [
+    "myTable__0__12__20250610T2140Z",
+    "myTable__0__13__20250610T2200Z"
+  ],
+  "1": [
+    "myTable__1__7__20250610T2145Z"
+  ]
+}
+```
+
+If Pinot finds no bad LLC segments, it returns an empty JSON object.
+
+## Other Notable APIs (1.4.0)
+
+The following APIs were added or enhanced in Pinot 1.4.0. Refer to Swagger for complete request/response details.
+
+| Endpoint                                          | Method | Description                                                             |
+| ------------------------------------------------- | ------ | ----------------------------------------------------------------------- |
+| `/tables/{tableName}/badLLCSegmentsPerPartition`  | GET    | Returns bad LLC segments grouped by partition ID                        |
+| `/tables/{tableName}/removeIngestionMetrics`       | POST   | Removes stale ingestion metrics for a table                             |
+| `/debug/serverRoutingStats`                       | GET    | Returns server routing stats as JSON (previously returned a string)     |
+| `/tables/{tableName}/idealstate`                  | GET    | Now accepts optional `segmentNames` parameter to filter results         |
+| `/tables/{tableName}/externalview`                | GET    | Now accepts optional `segmentNames` parameter to filter results         |
+| `/tenants/{tenantName}/tables`                    | GET    | Now supports `withTableProperties` parameter for richer tenant info     |
+| `/query_range`                                    | GET/POST | Prometheus-compatible time series query endpoint (Beta)                |
+
+{% hint style="info" %}
+For the complete and interactive list of all controller APIs, refer to the Swagger UI at `http://<controller-host>:<port>/help`. For a categorized overview of every endpoint documented on this site, see the main [API Reference](./).
+{% endhint %}

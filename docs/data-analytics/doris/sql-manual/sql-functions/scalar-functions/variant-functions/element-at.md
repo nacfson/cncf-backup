@@ -1,0 +1,140 @@
+---
+{
+    "title": "ELEMENT_AT",
+    "language": "en",
+    "description": "ELEMENT_AT extracts an element from an ARRAY, MAP, STRUCT, or VARIANT by index, key, or field name, with 1-based and negative array indexes."
+}
+---
+
+## Function
+
+The `ELEMENT_AT` function is used to extract the element value from an array, map, struct, or variant based on the specified index or key.
+
+- When applied to an **ARRAY**, it returns the element at the specified position.  
+- When applied to a **MAP**, it returns the value corresponding to the specified key.  
+- When applied to a **STRUCT**, it returns the subfield at the specified position (starting from 1) or with the specified field name, equivalent to `STRUCT_ELEMENT`.  
+- When applied to a **VARIANT**, it returns the value of the specified subfield.
+
+## Syntax
+
+```sql
+ELEMENT_AT(container, key_or_index)
+```
+
+## Parameters
+
+- `container`: Can be `ARRAY`, `MAP`, `STRUCT`, or `VARIANT`.
+- `key_or_index`:
+  - For `ARRAY`: An integer, with indexing starting from **1**.  
+  - For `MAP`: The key type (`K`) of the `MAP`, which can be any supported primitive type.  
+  - For `STRUCT`: A constant integer field position (starting from **1**) or a constant string field name (matched **case-insensitively**).  
+  - For `VARIANT` object access: A string key.
+  - For a VARIANT array in Doris 5.0.0 and later: An integer index; positive indexes are 1-based and negative indexes count backward from the end.
+
+## Return Value
+
+- For `ARRAY`: Returns the element at the specified index (`T` type).  
+- For `MAP`: Returns the value corresponding to the specified key (`V` type).  
+- For `STRUCT`: Returns the specified subfield value.  
+- For `VARIANT`: Returns a `VARIANT` type value. A missing key, index `0`, an out-of-range index, a string key on an array, an integer index on an object, and a key on a scalar value all return `NULL`.
+- If the index or key does not exist, returns `NULL` (for `STRUCT`, an out-of-bound position or a non-existent field name reports an error).  
+- If the parameter is `NULL`, returns `NULL`.
+
+## Notes
+
+1. **ARRAY and, in Doris 5.0.0 and later, VARIANT array indexes start from 1**, not 0.
+2. Negative indexes are supported for ARRAY and VARIANT array access: `-1` represents the last element, `-2` the second-to-last, and so on.
+3. The `ELEMENT_AT(container, key_or_index)` function behaves the same as `container[key_or_index]` (see examples for details).
+
+```sql
+SELECT ELEMENT_AT(parse_to_variant('[10, 20, 30]'), 1);  -- 10
+SELECT ELEMENT_AT(parse_to_variant('[10, 20, 30]'), 2);  -- 20
+SELECT ELEMENT_AT(parse_to_variant('[10, 20, 30]'), -1); -- 30
+```
+
+4. For `VARIANT`, a JSON `null` member of a value computed in a query is returned as a VARIANT `null`, which is not SQL `NULL`. In data read from a table, `null` members of objects outside arrays are not stored, so the same access returns SQL `NULL`. See [NULL semantics](../../../basic-element/sql-data-types/semi-structured/VARIANT.md#null-semantics).
+
+## Examples
+
+1. The `ELEMENT_AT` function works the same as `[]`.
+
+    ```SQL
+    SELECT ELEMENT_AT([1, 2, 3], 2);
+    +--------------------------+
+    | ELEMENT_AT([1, 2, 3], 2) |
+    +--------------------------+
+    |                        2 |
+    +--------------------------+
+
+    SELECT [1, 2, 3][2];
+    +--------------+
+    | [1, 2, 3][2] |
+    +--------------+
+    |            2 |
+    +--------------+
+    ```
+
+2. Array indexing starts from 1; out-of-bounds access returns `NULL`.
+
+    ```SQL
+    SELECT ELEMENT_AT([1, 2, 3], 0);
+    +--------------------------+
+    | ELEMENT_AT([1, 2, 3], 0) |
+    +--------------------------+
+    |                     NULL |
+    +--------------------------+
+
+    SELECT ELEMENT_AT([1, 2, 3], 4);
+    +--------------------------+
+    | ELEMENT_AT([1, 2, 3], 4) |
+    +--------------------------+
+    |                     NULL |
+    +--------------------------+
+    ```
+
+3. Accessing a non-existent KEY in a `MAP` returns `NULL`.
+
+    ```SQL
+    SELECT ELEMENT_AT({"a": 1, "b": 2}, "c");
+    +-----------------------------------+
+    | ELEMENT_AT({"a": 1, "b": 2}, "c") |
+    +-----------------------------------+
+    |                              NULL |
+    +-----------------------------------+
+    ```
+
+4. Accessing a `STRUCT` subfield by position or by field name (equivalent to `STRUCT_ELEMENT`).
+
+    ```SQL
+    SELECT ELEMENT_AT(NAMED_STRUCT('name', 'Jack', 'id', 1728923), 1);
+    +------------------------------------------------------------+
+    | ELEMENT_AT(NAMED_STRUCT('name', 'Jack', 'id', 1728923), 1) |
+    +------------------------------------------------------------+
+    | Jack                                                       |
+    +------------------------------------------------------------+
+
+    SELECT NAMED_STRUCT('name', 'Jack', 'id', 1728923)['id'];
+    +--------------------------------------------------+
+    | NAMED_STRUCT('name', 'Jack', 'id', 1728923)['id'] |
+    +--------------------------------------------------+
+    |                                          1728923 |
+    +--------------------------------------------------+
+    ```
+
+5. When accessing a subfield of a `VARIANT`, if the `VARIANT` value is not an OBJECT, `NULL` is returned.
+
+    ```SQL
+    SELECT ELEMENT_AT(PARSE_TO_VARIANT('{"a": 1, "b": 2}'), "a");
+    +-------------------------------------------------------+
+    | ELEMENT_AT(PARSE_TO_VARIANT('{"a": 1, "b": 2}'), "a") |
+    +-------------------------------------------------------+
+    | 1                                                     |
+    +-------------------------------------------------------+
+
+    SELECT ELEMENT_AT(PARSE_TO_VARIANT('123'), "");
+    +-------------------------------------------+
+    | ELEMENT_AT(PARSE_TO_VARIANT('123'), "")   |
+    +-------------------------------------------+
+    | NULL                                      |
+    +-------------------------------------------+
+    ```

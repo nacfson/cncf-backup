@@ -1,0 +1,161 @@
+---
+title: Monitoring
+---
+
+## OpenTelemetry
+
+When run as a server and configured accordingly, OPA will emit spans to an
+[OpenTelemetry](https://opentelemetry.io/) collector via gRPC.
+
+Each [REST API](./rest-api/) request sent to the server will start a span.
+If processing the request involves policy evaluation, and that in turn uses
+[`http.send`](./policy-reference/builtins/http), those HTTP clients will emit descendant spans.
+
+Endpoints that are polled often enough to drown out the interesting traces, such
+as the health check, can be left out via
+[`distributed_tracing.exclude_paths`](./configuration/#excluding-endpoints-from-tracing).
+
+Furthermore, spans exported for policy evaluation requests will contain an
+attribute `opa.decision_id` of the evaluation's decision ID _if_ the server
+has decision logging enabled.
+
+See [the configuration documentation](./configuration/#distributed-tracing)
+for all OpenTelemetry-related configurable options.
+
+## Prometheus
+
+OPA exposes an HTTP endpoint that can be used to collect performance metrics
+for all API calls. The Prometheus endpoint is enabled by default when you run
+OPA as a server.
+
+You can enable metric collection from OPA with the following `prometheus.yml` config:
+
+```yaml
+global:
+  scrape_interval: 15s
+scrape_configs:
+- job_name: "opa"
+  metrics_path: "/metrics"
+  static_configs:
+  - targets:
+    - "localhost:8181"
+```
+
+The Prometheus endpoint exports Go runtime metrics as well as HTTP request latency metrics for all handlers (e.g., `v1/data`).
+
+| Metric name                      | Metric type | Description                                                        | Status |
+| -------------------------------- | ----------- | ------------------------------------------------------------------ | ------ |
+| go_gc_duration_seconds           | summary     | A summary of the GC invocation durations.                          | STABLE |
+| go_goroutines                    | gauge       | Number of goroutines that currently exist.                         | STABLE |
+| go_info                          | gauge       | Information about the Go environment.                              | STABLE |
+| go_memstats_alloc_bytes          | gauge       | Number of bytes allocated and still in use.                        | STABLE |
+| go_memstats_alloc_bytes_total    | counter     | Total number of bytes allocated, even if freed.                    | STABLE |
+| go_memstats_buck_hash_sys_bytes  | gauge       | Number of bytes used by the profiling bucket hash table.           | STABLE |
+| go_memstats_frees_total          | counter     | Total number of frees.                                             | STABLE |
+| go_memstats_gc_sys_bytes         | gauge       | Number of bytes used for garbage collection system metadata.       | STABLE |
+| go_memstats_heap_alloc_bytes     | gauge       | Number of heap bytes allocated and still in use.                   | STABLE |
+| go_memstats_heap_idle_bytes      | gauge       | Number of heap bytes waiting to be used.                           | STABLE |
+| go_memstats_heap_inuse_bytes     | gauge       | Number of heap bytes that are in use.                              | STABLE |
+| go_memstats_heap_objects         | gauge       | Number of allocated objects.                                       | STABLE |
+| go_memstats_heap_released_bytes  | gauge       | Number of heap bytes released to OS.                               | STABLE |
+| go_memstats_heap_sys_bytes       | gauge       | Number of heap bytes obtained from system.                         | STABLE |
+| go_memstats_last_gc_time_seconds | gauge       | Number of seconds since 1970 of last garbage collection.           | STABLE |
+| go_memstats_lookups_total        | counter     | Total number of pointer lookups.                                   | STABLE |
+| go_memstats_mallocs_total        | counter     | Total number of mallocs.                                           | STABLE |
+| go_memstats_mcache_inuse_bytes   | gauge       | Number of bytes in use by mcache structures.                       | STABLE |
+| go_memstats_mcache_sys_bytes     | gauge       | Number of bytes used for mcache structures obtained from system.   | STABLE |
+| go_memstats_mspan_inuse_bytes    | gauge       | Number of bytes in use by mspan structures.                        | STABLE |
+| go_memstats_mspan_sys_bytes      | gauge       | Number of bytes used for mspan structures obtained from system.    | STABLE |
+| go_memstats_next_gc_bytes        | gauge       | Number of heap bytes when next garbage collection will take place. | STABLE |
+| go_memstats_other_sys_bytes      | gauge       | Number of bytes used for other system allocations.                 | STABLE |
+| go_memstats_stack_inuse_bytes    | gauge       | Number of bytes in use by the stack allocator.                     | STABLE |
+| go_memstats_stack_sys_bytes      | gauge       | Number of bytes obtained from system for stack allocator.          | STABLE |
+| go_memstats_sys_bytes            | gauge       | Number of bytes obtained from system.                              | STABLE |
+| go_threads                       | gauge       | Number of OS threads created.                                      | STABLE |
+| http_request_duration_seconds    | histogram   | A histogram of duration for requests.                              | STABLE |
+
+### HTTP Request Duration Buckets
+
+The `http_request_duration_seconds` histogram records request durations in seconds. By default, the bucket upper bounds
+range from 1 microsecond to 1 second:
+
+| Bucket (`le`) | Upper bound      |
+| ------------- | ---------------- |
+| `1e-06`       | 1 microsecond    |
+| `5e-06`       | 5 microseconds   |
+| `1e-05`       | 10 microseconds  |
+| `5e-05`       | 50 microseconds  |
+| `0.0001`      | 100 microseconds |
+| `0.0005`      | 500 microseconds |
+| `0.001`       | 1 millisecond    |
+| `0.01`        | 10 milliseconds  |
+| `0.1`         | 100 milliseconds |
+| `1`           | 1 second         |
+| `+Inf`        | no upper bound   |
+
+Buckets are cumulative: each `le` ("less than or equal") bucket counts all requests that took at most that long, including
+those counted in smaller buckets. Requests that take longer than 1 second are only counted in the `+Inf` bucket, which
+always equals the total request count (`http_request_duration_seconds_count`).
+
+For example, in the output below 13 requests were made to `v1/data`, 12 of them completed within 100 microseconds and
+all 13 within 500 microseconds:
+
+```
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="1e-06"} 0
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="5e-06"} 0
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="1e-05"} 0
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="5e-05"} 0
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="0.0001"} 12
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="0.0005"} 13
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="0.001"} 13
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="0.01"} 13
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="0.1"} 13
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="1"} 13
+http_request_duration_seconds_bucket{code="200",handler="v1/data",method="get",le="+Inf"} 13
+```
+
+Quantiles such as p99 are estimated from these buckets (e.g. with PromQL's `histogram_quantile`), so their precision is
+limited by the bucket boundaries. The buckets can be changed with the
+`server.metrics.prom.http_request_duration_seconds.buckets` configuration field, see
+[Configuration](./configuration/#server).
+
+### Status Metrics
+
+When Prometheus is enabled in the status plugin (see [Configuration](./configuration/#status)), the OPA instance's Prometheus endpoint also exposes these metrics:
+
+| Metric name                                                  | Metric type | Description                                                                                                     | Status       |
+| ------------------------------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------- | ------------ |
+| opa_info                                                     | gauge       | Information about the OPA environment.                                                                          | STABLE       |
+| plugin_status_gauge                                          | gauge       | Number of plugins by name and status.                                                                           | STABLE       |
+| bundle_loaded_counter                                        | counter     | Number of bundles loaded with success.                                                                          | STABLE       |
+| bundle_failed_load_counter                                   | counter     | Number of bundles that failed to load.                                                                          | STABLE       |
+| last_bundle_request                                          | gauge       | Last bundle request in UNIX nanoseconds.                                                                        | STABLE       |
+| last_success_bundle_activation                               | gauge       | Last successful bundle activation in UNIX nanoseconds.                                                          | STABLE       |
+| last_success_bundle_download                                 | gauge       | Last successful bundle download in UNIX nanoseconds.                                                            | STABLE       |
+| last_success_bundle_request                                  | gauge       | Last successful bundle request in UNIX nanoseconds.                                                             | STABLE       |
+| bundle_loading_duration_ns                                   | histogram   | A histogram of duration for bundle loading.                                                                     | STABLE       |
+| decision_logs_status_gauge                                   | gauge       | Status of the last decision log upload, labeled by `code` and `http_code` (both empty on success).              | STABLE       |
+| decision_logs_dropped_rate_limit_exceeded_total              | counter     | Incremented when decisions are dropped because `decision_logs.reporting.max_decisions_per_second` was exceeded. | STABLE       |
+| decision_logs_dropped_buffer_size_limit_exceeded_total       | counter     | Incremented when decisions are dropped because the decision log buffer was full.                                | STABLE       |
+| decision_logs_dropped_buffer_size_limit_bytes_exceeded_total | counter     | Incremented when decisions are dropped because `decision_logs.reporting.buffer_size_limit_bytes` was exceeded.  | STABLE       |
+| decision_logs_encoding_failure_total                         | counter     | Number of decisions dropped because they could not be encoded or did not fit in `upload_size_limit_bytes`.      | STABLE       |
+| decision_logs_nd_builtin_cache_dropped_total                 | counter     | Number of decisions logged without their non-deterministic builtin cache to fit in `upload_size_limit_bytes`.   | STABLE       |
+| enc_log_exceeded_upload_size_limit_bytes_total               | counter     | Number of decisions whose encoded size exceeded `decision_logs.reporting.upload_size_limit_bytes`.              | STABLE       |
+| decision_logs_chunks_uploaded_total                          | counter     | Number of decision log chunks uploaded successfully.                                                            | EXPERIMENTAL |
+| decision_logs_chunks_upload_failed_total                     | counter     | Number of decision log chunk uploads that failed. Failed chunks are requeued and retried.                       | EXPERIMENTAL |
+| decision_logs_buffer_size_events                             | gauge       | Items waiting in the `event` buffer, limited by `decision_logs.reporting.buffer_size_limit_events`.             | EXPERIMENTAL |
+| decision_logs_buffer_size_bytes                              | gauge       | Compressed bytes waiting in the `size` buffer, limited by `decision_logs.reporting.buffer_size_limit_bytes`.    | EXPERIMENTAL |
+
+The `decision_logs_*` and `enc_*` counters are updated with each status update and are
+only exported once the decision logs plugin has reported them. The `decision_logs_buffer_size_*` gauges
+are read at scrape time, and only the one matching `decision_logs.reporting.buffer_type` is exported.
+
+## Health Checks
+
+OPA exposes a `/health` API endpoint that can be used to perform health checks.
+See [Health API](./rest-api#health-api) for details.
+
+## Status API
+
+OPA provides a plugin which can push status to a remote service.
+See [Status API](./management-status) for details.

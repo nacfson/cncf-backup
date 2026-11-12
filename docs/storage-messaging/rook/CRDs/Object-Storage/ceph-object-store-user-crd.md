@@ -1,0 +1,107 @@
+---
+title: CephObjectStoreUser CRD
+---
+
+Rook allows creation and customization of object store users through the custom resource definitions (CRDs). The following settings are available
+for Ceph object store users.
+
+## Example
+
+```yaml
+apiVersion: ceph.rook.io/v1
+kind: CephObjectStoreUser
+metadata:
+  name: my-user
+  namespace: rook-ceph
+spec:
+  store: my-store
+  displayName: my-display-name
+  quotas:
+    maxBuckets: 100
+    maxSize: 10G
+    maxObjects: 10000
+  capabilities:
+    user: "*"
+    bucket: "*"
+  opMask:
+    - read
+    - write
+    - delete
+  defaultPlacement: hot-tier
+  defaultStorageClass: STANDARD_IA
+  secretTemplate:
+    labels:
+      team: payments
+    annotations:
+      reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+      reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: "payments-app"
+```
+
+## Object Store User Settings
+
+### Metadata
+
+* `name`: The name of the object store user to create, which will be reflected in the secret and other resource names.
+* `namespace`: The namespace of the Rook cluster where the object store user is created.
+
+### Spec
+
+* `store`: The object store in which the user will be created. This matches the name of the objectstore CRD.
+* `displayName`: The display name which will be passed to the `radosgw-admin user create` command.
+* `clusterNamespace`: The namespace where the parent CephCluster and CephObjectStore are found. If not specified,
+    the user must be in the same namespace as the cluster and object store.
+    To enable this feature, the CephObjectStore allowUsersInNamespaces must include the namespace of this user.
+* `quotas`: This represents quota limitation can be set on the user. Please refer [here](https://docs.ceph.com/en/latest/radosgw/admin/#quota-management) for details.
+    * `maxBuckets`: The maximum bucket limit for the user.
+    * `maxSize`: Maximum size limit of all objects across all the user's buckets.
+    * `maxObjects`: Maximum number of objects across all the user's buckets.
+* `capabilities`: Ceph allows users to be given additional permissions. Due to missing APIs in go-ceph for updating the user capabilities, this setting can currently only be used during the creation of the object store user. If a user's capabilities need modified, the user must be deleted and re-created.
+    See the [Ceph docs](https://docs.ceph.com/en/latest/radosgw/admin/#add-remove-admin-capabilities) for more info.
+    Rook supports adding `read`, `write`, `read, write`, or `*` permissions for the following resources:
+    * `user`
+    * `buckets`
+    * `usage`
+    * `metadata`
+    * `zone`
+    * `roles`
+    * `info`
+    * `amz-cache`
+    * `bilog`
+    * `mdlog`
+    * `datalog`
+    * `user-policy`
+    * `odic-provider`
+    * `ratelimit`
+    * `userInfoWithoutKeys` # minimum ceph version 19.2.0 for supporting this cap
+    * `accounts` # minimum ceph version 19.2.3 for supporting this cap
+* `defaultPlacement`: The default pool placement target for buckets created by this user, overriding the zonegroup default.
+    The value must name a placement target known to the zonegroup serving the object store; RGW validates it and
+    rejects an unknown target, in which case the user's status phase becomes `Failure` and the RGW error is recorded as
+    an Event on the CephObjectStoreUser.
+    Removing this setting stops Rook from managing the user's placement and leaves the last applied value in place on the
+    RGW user; it does not restore the zonegroup default. To pin the user to the zonegroup default target, set this
+    setting to that target's name.
+* `defaultStorageClass`: The default storage class for objects created by this user, within `defaultPlacement`, which
+    must also be set. The storage class must exist on that placement target; RGW validates it. Removing this setting
+    stops Rook from managing the user's storage class, as with `defaultPlacement`: the value in place is preserved,
+    except when `defaultPlacement` changes, which resets the storage class to the new target's default (`STANDARD`).
+* `opMask`: Internally, RGW labels "operations" on persistent state as `RGW_OP_TYPE_READ` (`read`), `RGW_OP_TYPE_WRITE` (`write`), or `RGW_OP_TYPE_DELETE` (`delete`). All RGW users have an "operation mask", which does not function as mask or filter as is typically implied by the word "mask", but as a set of allowed or permissible "operation" types the user is able to perform. The "operation mask" is applied regardless of the bucket or IAM policy. For example, in order for an RGW user to be able to read an object from a bucket, that user must have **both** the `read` "op mask" bit and an IAM/bucket policy that allows `s3:GetObject`. The default operations allowed are `read`, `write`, and `delete`. Setting the value to `[]` (an empty YAML sequence) causes all "operations" in the mask to be removed, meaning that the user will not be able to perform any operations. These operation masks are supported:
+    * `read`
+    * `write`
+    * `delete`
+* `secretTemplate`: Labels and annotations to add to the Secret that holds the user's credentials,
+    `rook-ceph-object-user-<store>-<name>`. Tools that copy Secrets into other namespaces, such as Reflector,
+    kubernetes-replicator, or a Kyverno generate policy, select the Secrets to copy by label or annotation, so this
+    setting can opt the Secret in to such a tool. Rook writes the Secret's full set of labels and annotations on every
+    reconcile: removing an entry removes it from the Secret, and labels or annotations added to the Secret by other means
+    are removed.
+    * `labels`: 1 to 32 labels. The keys `app`, `user`, `rook_cluster`, `rook_object_store`, and `do_not_reconcile`,
+        and keys with a `rook.io` or `*.rook.io` prefix, are reserved by Rook and rejected.
+    * `annotations`: 1 to 32 annotations, at most 256 KiB in total, the limit Kubernetes sets for a Secret's
+        annotations. The key `cephx-keyring`, and keys with a `rook.io` or `*.rook.io` prefix, are reserved by Rook
+        and rejected.
+
+!!! warning
+    Anyone who can create or edit a CephObjectStoreUser can use `secretTemplate` to hand the user's credentials to any
+    controller that acts on Secret labels or annotations, for example one that copies the Secret into another namespace.
+    Grant write access to CephObjectStoreUsers with this in mind, or restrict `secretTemplate` with an admission policy.

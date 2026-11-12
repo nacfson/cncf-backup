@@ -1,0 +1,514 @@
+---
+description: >-
+  Explore the minion component in Apache Pinot, empowering efficient data
+  movement and segment generation within Pinot clusters.
+---
+
+# Minion
+
+A Pinot minion is an optional cluster component that executes background tasks on table data apart from the query processes performed by brokers and servers. Minions run on independent hardware resources, and are responsible for executing _minion tasks_ as directed by the controller. Examples of minon tasks include converting batch data from a standard format like Avro or JSON into segment files to be loaded into an offline table, and rewriting existing segment files to purge records as required by data privacy laws like GDPR. Minion tasks can run once or be scheduled to run periodically.
+
+Minions isolate the computational burden of out-of-band data processing from the servers. Although a Pinot cluster can function with or without minions, they are typically present to support routine tasks like batch data ingest.
+
+## Starting a minion
+
+Make sure you've [set up Zookeeper](./#set-up-a-pinot-cluster). If you're using Docker, make sure to [pull the Pinot Docker image](./#set-up-a-pinot-cluster). To start a minion:
+
+```
+Usage: StartMinion
+    -help                                                   : Print this message. (required=false)
+    -minionHost               <String>                      : Host name for minion. (required=false)
+    -minionPort               <int>                         : Port number to start the minion at. (required=false)
+    -zkAddress                <http>                        : HTTP address of Zookeeper. (required=false)
+    -clusterName              <String>                      : Pinot cluster name. (required=false)
+    -configFileName           <Config File Name>            : Minion Starter Config file. (required=false)
+```
+
+{% tabs %}
+{% tab title="Docker Image" %}
+```
+docker run \
+    --network=pinot-demo \
+    --name pinot-minion \
+    -d ${PINOT_IMAGE} StartMinion \
+    -zkAddress pinot-zookeeper:2181
+```
+{% endtab %}
+
+{% tab title="Launcher Scripts" %}
+```
+bin/pinot-admin.sh StartMinion \
+    -zkAddress localhost:2181
+```
+{% endtab %}
+{% endtabs %}
+
+## Interfaces
+
+![](../../../.gitbook/assets/task-interface-diagram.png)
+
+### Pinot task generator
+
+The Pinot task generator interface defines the APIs for the controller to generate tasks for minions to execute.
+
+```java
+
+{% hint style="warning" %}
+**Duplicate Keys in Configuration File**
+
+Starting from Apache Pinot 1.3.0, duplicate keys in the minion configuration file will cause a `ConfigurationException` to be thrown during startup. Previously, duplicate keys would be silently merged into a list. If you encounter this error, ensure that each configuration property appears only once in your configuration file. The exception will include the exact file path, duplicate key name, and the line numbers where the duplicates were found.
+
+Example error:
+```
+ConfigurationException: Duplicate key found in /path/to/minion.conf at line 10 and line 15: pinot.minion.task.allow.download.from.server
+```
+{% endhint %}
+
+public interface PinotTaskGenerator {
+
+  /**
+   * Initializes the task generator.
+   */
+  void init(ClusterInfoAccessor clusterInfoAccessor);
+
+  /**
+   * Returns the task type of the generator.
+   */
+  String getTaskType();
+
+  /**
+   * Generates a list of tasks to schedule based on the given table configs.
+   */
+  List<PinotTaskConfig> generateTasks(List<TableConfig> tableConfigs);
+
+  /**
+   * Returns the timeout in milliseconds for each task, 3600000 (1 hour) by default.
+   */
+  default long getTaskTimeoutMs() {
+    return JobConfig.DEFAULT_TIMEOUT_PER_TASK;
+  }
+
+  /**
+   * Returns the maximum number of concurrent tasks allowed per instance, 1 by default.
+   */
+  default int getNumConcurrentTasksPerInstance() {
+    return JobConfig.DEFAULT_NUM_CONCURRENT_TASKS_PER_INSTANCE;
+  }
+
+  /**
+   * Performs necessary cleanups (e.g. remove metrics) when the controller leadership changes.
+   */
+  default void nonLeaderCleanUp() {
+  }
+}
+```
+
+### PinotTaskExecutorFactory
+
+Factory for `PinotTaskExecutor` which defines the APIs for Minion to execute the tasks.
+
+```java
+public interface PinotTaskExecutorFactory {
+
+  /**
+   * Initializes the task executor factory.
+   */
+  void init(MinionTaskZkMetadataManager zkMetadataManager);
+
+  /**
+   * Returns the task type of the executor.
+   */
+  String getTaskType();
+
+  /**
+   * Creates a new task executor.
+   */
+  PinotTaskExecutor create();
+}
+```
+
+```java
+public interface PinotTaskExecutor {
+
+  /**
+   * Executes the task based on the given task config and returns the execution result.
+   */
+  Object executeTask(PinotTaskConfig pinotTaskConfig)
+      throws Exception;
+
+  /**
+   * Tries to cancel the task.
+   */
+  void cancel();
+}
+```
+
+### MinionEventObserverFactory
+
+Factory for `MinionEventObserver` which defines the APIs for task event callbacks on minion.
+
+```java
+public interface MinionEventObserverFactory {
+
+  /**
+   * Initializes the task executor factory.
+   */
+  void init(MinionTaskZkMetadataManager zkMetadataManager);
+
+  /**
+   * Returns the task type of the event observer.
+   */
+  String getTaskType();
+
+  /**
+   * Creates a new task event observer.
+   */
+  MinionEventObserver create();
+}
+```
+
+```java
+public interface MinionEventObserver {
+
+  /**
+   * Invoked when a minion task starts.
+   *
+   * @param pinotTaskConfig Pinot task config
+   */
+  void notifyTaskStart(PinotTaskConfig pinotTaskConfig);
+
+  /**
+   * Invoked when a minion task succeeds.
+   *
+   * @param pinotTaskConfig Pinot task config
+   * @param executionResult Execution result
+   */
+  void notifyTaskSuccess(PinotTaskConfig pinotTaskConfig, @Nullable Object executionResult);
+
+  /**
+   * Invoked when a minion task gets cancelled.
+   *
+   * @param pinotTaskConfig Pinot task config
+   */
+  void notifyTaskCancelled(PinotTaskConfig pinotTaskConfig);
+
+  /**
+   * Invoked when a minion task encounters exception.
+   *
+   * @param pinotTaskConfig Pinot task config
+   * @param exception Exception encountered during execution
+   */
+  void notifyTaskError(PinotTaskConfig pinotTaskConfig, Exception exception);
+}
+```
+
+## Built-in tasks
+
+Pinot ships with the following built-in Minion tasks:
+
+| Task | Purpose | Table Types |
+|------|---------|-------------|
+| [SegmentGenerationAndPushTask](../../../operate-pinot/segment-generation-and-push-task.md) | Batch ingestion: reads raw data files and converts them into Pinot segments | OFFLINE |
+| [RealtimeToOfflineSegmentsTask](../../../operate-pinot/pinot-managed-offline-flows.md) | Converts completed real-time segments into optimized offline segments | REALTIME to OFFLINE |
+| [MergeRollupTask](../../../operate-pinot/minion-merge-rollup-task.md) | Merges small segments into larger ones and optionally rolls up data at coarser granularity | OFFLINE, REALTIME (without upsert/dedup) |
+| [PurgeTask](../../../operate-pinot/purge-task.md) | Removes or modifies records for data retention and compliance (e.g., GDPR) | OFFLINE, REALTIME |
+| [RefreshSegmentTask](../../../operate-pinot/refresh-segment-task.md) | Reprocesses segments after table config or schema changes (new indexes, columns, data types) | OFFLINE, REALTIME |
+| [UpsertCompactionTask](../../../operate-pinot/upsert-compaction-task.md) | Compacts individual upsert segments by removing invalidated records | REALTIME (upsert only) |
+| [UpsertCompactMergeTask](../../../operate-pinot/upsert-compact-merge-task.md) | Merges multiple small upsert segments into larger ones to reduce segment count | REALTIME (upsert only) |
+
+{% hint style="info" %}
+`PurgeTask`, `RefreshSegmentTask`, and `UpsertCompactionTask` all rebuild a single segment and upload the replacement segment. If that upload fails, Pinot marks the task attempt as failed instead of reporting success, so the Minion task framework can retry it.
+{% endhint %}
+
+### SegmentGenerationAndPushTask
+
+The SegmentGenerationAndPushTask can fetch files from an input folder (e.g. from an S3 bucket) and convert them into segments. It converts one file into one segment and keeps the file name in segment metadata to avoid duplicate ingestion.
+
+See [SegmentGenerationAndPushTask runbook](../../../operate-pinot/segment-generation-and-push-task.md) for full configuration details.
+
+Below is an example task config to put in TableConfig to enable this task. The task is scheduled every 10min to keep ingesting remaining files, with 10 parallel task at max and 1 file per task.
+
+NOTE: You may want to simply omit "tableMaxNumTasks" due to this caveat: the task generates one segment per file, and derives segment name based on the time column of the file. If two files happen to have same time range and are ingested by tasks from different schedules, there might be segment name conflict. To overcome this issue for now, you can omit “tableMaxNumTasks” and by default it’s Integer.MAX\_VALUE, meaning to schedule as many tasks as possible to ingest all input files in a single batch. Within one batch, a sequence number suffix is used to ensure no segment name conflict. Because the sequence number suffix is scoped within one batch, tasks from different batches might encounter segment name conflict issue said above.
+
+{% hint style="info" %}
+When performing ingestion at scale remember that Pinot will list all of the files contained in the \`inputDirURI\` every time a \`SegmentGenerationAndPushTask\` job gets scheduled. This could become a bottleneck when fetching files from a cloud bucket like GCS. To prevent this make \`inputDirURI\` point to the least number of files possible.
+{% endhint %}
+
+```
+  "ingestionConfig": {
+    "batchIngestionConfig": {
+      "segmentIngestionType": "APPEND",
+      "segmentIngestionFrequency": "DAILY",
+      "batchConfigMaps": [
+        {
+          "input.fs.className": "org.apache.pinot.plugin.filesystem.S3PinotFS",
+          "input.fs.prop.region": "us-west-2",
+          "input.fs.prop.secretKey": "....",
+          "input.fs.prop.accessKey": "....",
+          "inputDirURI": "s3://my.s3.bucket/batch/airlineStats/rawdata/",
+          "includeFileNamePattern": "glob:**/*.avro",
+          "excludeFileNamePattern": "glob:**/*.tmp",
+          "inputFormat": "avro"
+        }
+      ]
+    }
+  },
+  "task": {
+    "taskTypeConfigsMap": {
+      "SegmentGenerationAndPushTask": {
+        "schedule": "0 */10 * * * ?",
+        "tableMaxNumTasks": "10"
+      }
+    }
+  }
+```
+
+### RealtimeToOfflineSegmentsTask
+
+See [Pinot managed Offline flows](../../../operate-pinot/pinot-managed-offline-flows.md) for details.
+
+### MergeRollupTask
+
+See [Minion merge rollup task](../../../operate-pinot/minion-merge-rollup-task.md) for details.
+
+### PurgeTask
+
+See [PurgeTask runbook](../../../operate-pinot/purge-task.md) for details.
+
+### RefreshSegmentTask
+
+See [RefreshSegmentTask runbook](../../../operate-pinot/refresh-segment-task.md) for details.
+
+### UpsertCompactionTask
+
+See [UpsertCompactionTask runbook](../../../operate-pinot/upsert-compaction-task.md) for details.
+
+### UpsertCompactMergeTask
+
+See [UpsertCompactMergeTask runbook](../../../operate-pinot/upsert-compact-merge-task.md) for details.
+
+## Enable tasks
+
+Tasks are enabled on a per-table basis. To enable a certain task type (e.g. `myTask`) on a table, update the table config to include the task type:
+
+```javascript
+{
+  ...
+  "task": {
+    "taskTypeConfigsMap": {
+      "myTask": {
+        "myProperty1": "value1",
+        "myProperty2": "value2"
+      }
+    }
+  }
+}
+```
+
+Under each enable task type, custom properties can be configured for the task type.
+
+You can also override how Pinot schedules task generation for a table by setting `concurrentSchedulingEnabled` in the same `task` block:
+
+```javascript
+{
+  ...
+  "task": {
+    "concurrentSchedulingEnabled": true,
+    "taskTypeConfigsMap": {
+      "myTask": {
+        "myProperty1": "value1"
+      }
+    }
+  }
+}
+```
+
+Use `concurrentSchedulingEnabled` as follows:
+
+* `null` or omitted: inherit the cluster default from `controller.task.concurrentSchedulingEnabled`
+* `true`: opt this table into concurrent task scheduling
+* `false`: force the legacy serialized scheduling path for this table, even if the cluster default is concurrent
+
+There are also two task configs to be set as part of cluster configs like below. One controls task's overall timeout (1hr by default) and one for how many tasks to run on a single minion worker (1 by default).
+
+```
+Using "POST /cluster/configs" API on CLUSTER tab in Swagger, with this payload
+{
+	"RealtimeToOfflineSegmentsTask.timeoutMs": "600000",
+	"RealtimeToOfflineSegmentsTask.numConcurrentTasksPerInstance": "4"
+}
+```
+
+## Schedule tasks
+
+### Auto-schedule
+
+There are 2 ways to enable task scheduling:
+
+#### Controller level schedule for all minion tasks
+
+Tasks can be scheduled periodically for all task types on all enabled tables. Enable auto task scheduling by configuring the schedule frequency in the controller config with the key `controller.task.frequencyPeriod`. This takes period strings as values, e.g. 2h, 30m, 1d.
+
+To let PinotTaskManager generate tasks for different tables in parallel, enable distributed locking first and then enable concurrent scheduling:
+
+```properties
+controller.task.enableDistributedLocking=true
+controller.task.concurrentSchedulingEnabled=true
+```
+
+If you want to keep the cluster default serialized, leave `controller.task.concurrentSchedulingEnabled=false` and opt individual tables in with `task.concurrentSchedulingEnabled=true`. Pinot uses the concurrent path only when every table targeted by a scheduling request resolves to concurrent scheduling.
+
+#### Per table and task level schedule
+
+Tasks can also be scheduled based on cron expressions. The cron expression is set in the `schedule` config for each task type separately. This config in the controller config, `controller.task.scheduler.enabled` should be set to `true` to enable cron scheduling.
+
+As shown below, the RealtimeToOfflineSegmentsTask will be scheduled at the first second of every minute (following the syntax [defined here](http://www.quartz-scheduler.org/documentation/quartz-2.3.0/tutorials/crontrigger.html)).
+
+```
+  "task": {
+    "taskTypeConfigsMap": {
+      "RealtimeToOfflineSegmentsTask": {
+        "bucketTimePeriod": "1h",
+        "bufferTimePeriod": "1h",
+        "schedule": "0 * * * * ?"
+      }
+    }
+  },
+```
+
+### Manual schedule
+
+Tasks can be manually scheduled using the following controller rest APIs:
+
+| Rest API                                                             | Description                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------------------------ |
+| **POST /tasks/schedule**                                             | Schedule tasks for all task types on all enabled tables      |
+| **POST /tasks/schedule?taskType=myTask**                             | Schedule tasks for the given task type on all enabled tables |
+| **POST /tasks/schedule?tableName=myTable\_OFFLINE**                  | Schedule tasks for all task types on the given table         |
+| **POST /tasks/schedule?taskType=myTask\&tableName=myTable\_OFFLINE** | Schedule tasks for the given task type on the given table    |
+
+### Schedule task on specific instances
+
+Tasks can be scheduled on specific instances using the following config at task level:
+```
+  "task": {
+    "taskTypeConfigsMap": {
+      "RealtimeToOfflineSegmentsTask": {
+        "bucketTimePeriod": "1h",
+        "bufferTimePeriod": "1h",
+        "schedule": "0 * * * * ?",
+        "minionInstanceTag": "tag1_MINION"
+      }
+    }
+  },
+```
+
+By default, the value is `minion_untagged` to have backward-compatibility. This will allow users to schedule tasks on specific nodes and isolate tasks among tables / task-types.
+
+| Rest API                                                                                             | Description                                                                                          |
+|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| **POST /tasks/schedule?taskType=myTask\&tableName=myTable\_OFFLINE\&minionInstanceTag=tag1\_MINION** | Schedule tasks for the given task type of the given table on the minion nodes tagged as tag1_MINION. |
+
+## Task level advanced configs
+
+### allowDownloadFromServer
+
+When a task is executed on a segment, the minion node fetches the segment from deepstore. If the deepstore is not accessible, the minion node can download the segment from the server node. This is controlled by the `allowDownloadFromServer` config in the task config. By default, this is set to `false`.
+
+We can also set this config at a minion instance level `pinot.minion.task.allow.download.from.server` (default is `false`). This instance level config helps in enforcing this behaviour if the number of tables / tasks is pretty high and we want to enable for all. Note: task-level config will override instance-level config value.
+
+## Plug-in custom tasks
+
+To plug in a custom task, implement `PinotTaskGenerator`, `PinotTaskExecutorFactory` and `MinionEventObserverFactory` (optional) for the task type (all of them should return the same string for `getTaskType()`), and annotate them with the following annotations:
+
+| Implementation             | Annotation            |
+| -------------------------- | --------------------- |
+| PinotTaskGenerator         | @TaskGenerator        |
+| PinotTaskExecutorFactory   | @TaskExecutorFactory  |
+| MinionEventObserverFactory | @EventObserverFactory |
+
+After annotating the classes, put them under the package of name `org.apache.pinot.*.plugin.minion.tasks.*`, then they will be auto-registered by the controller and minion.
+
+### Example
+
+See [SimpleMinionClusterIntegrationTest](https://github.com/apache/pinot/blob/master/pinot-integration-tests/src/test/java/org/apache/pinot/integration/tests/SimpleMinionClusterIntegrationTest.java) where the `TestTask` is plugged-in.
+
+## Task Manager UI
+
+In the Pinot Data Explorer, select **Minion Tasks** from the left navigation to open the **Minion Task Manager** page. This page focuses on minion queue troubleshooting and task drill-downs. Controller-wide scheduler details live on the [Cluster Manager page](../exploring-pinot.md), where **Cron Scheduler Information** and **Periodic Tasks** are shown separately.
+
+The Minion Task Manager landing page shows four summary tiles:
+
+- **Task Types**
+- **Minion Instances**
+- **Running Tasks**
+- **Waiting Tasks**
+
+Below the summary tiles is the task-queue table. This table shows which task types are active in Helix and lets you drill into each queue.
+
+This one shows which types of Minion Task have been used. Essentially which task types have created their task queues in Helix.
+
+![](../../../.gitbook/assets/minion-task-manager-overview.png)
+
+**
+
+Clicking into a task type shows the tables using that task type, along with queue-management actions such as stopping or cleaning up the queue.
+
+![](../../../.gitbook/assets/minion-task-manager-task-details.png)
+
+**
+
+Then clicking into any table in this list, one can see how the task is configured for that table. And the task metadata if there is one in ZK. For example, MergeRollupTask tracks a watermark in ZK. If the task is cron scheduled, the current and next schedules are also shown in this page like below.
+
+![](../../../.gitbook/assets/minion-rollup-task-scheduled.png)
+
+**
+
+![](../../../.gitbook/assets/minion-rollup-task-completed.png)
+
+**
+
+At the bottom of this page is a list of tasks generated for this table for this specific task type. Like here, one MergeRollup task has been generated and completed. The task list also includes a **Status Filter** control so you can focus on a single task state, and a **Sub Tasks (Total/Completed/Running/Waiting/Error/Other)** column that summarizes the subtasks for each task. The **Other** bucket combines `UNKNOWN`, `DROPPED`, `TIMED_OUT`, and `ABORTED` subtasks.
+
+Clicking into a task opens task details including start and finish times, runtime configuration, and an **Operations** accordion with a **Delete Task** action for removing the task and its subtasks from the queue. The task detail page also lists the subtasks generated for that task (as context, one minion task can have multiple subtasks to process data in parallel). The subtask table has its own **Status Filter** control, which is useful when a task fanout creates many subtasks across multiple minion workers. In this example, it happened to have one sub-task here, and it shows when it starts and stops and which minion worker it's running.
+
+![](../../../.gitbook/assets/minion-task-manager-subtask.png)
+
+**
+
+Clicking into this subtask shows more details such as the input task config, progress, and error information if the task failed. If the subtask has already been assigned to a minion worker, the page also includes a **Minion Log Files** panel so you can refresh the file list and download logs from that minion directly in the UI.
+
+![](../../../.gitbook/assets/minion-task-manager-subtask-config.png)
+
+**
+
+## Task-related metrics
+
+There is a controller job that runs every 5 minutes by default, controlled by `controller.minion.task.metrics.emitter.frequencyPeriod`, and emits metrics about Minion tasks scheduled in Pinot. The following metrics are emitted for each task type:
+
+* _**NumMinionTasksInProgress**_: Number of running tasks
+* _**NumMinionSubtasksRunning**_: Number of running sub-tasks
+* _**NumMinionSubtasksWaiting**_: Number of waiting sub-tasks (unassigned to a minion as yet)
+* _**NumMinionSubtasksError**_: Number of error sub-tasks (completed with an error/exception)
+* _**PercentMinionSubtasksInQueue**_: Percent of sub-tasks in waiting or running states
+* _**PercentMinionSubtasksInError**_: Percent of sub-tasks in error
+* _**MaxSubtaskWaitTimeMs**_: Per-table, per-task-type controller gauge for the longest current wait time across subtasks in `WAITING`. Pinot emits `0` when no subtasks are waiting, so alerts can self-resolve after the queue drains.
+* _**MaxSubtaskRunningTimeMs**_: Per-table, per-task-type controller gauge for the longest current runtime across subtasks in `RUNNING`. Pinot emits `0` when no subtasks are running.
+
+The controller also emits metrics about how tasks are cron scheduled:
+
+* **cronSchedulerJobScheduled:** Number of current cron schedules registered to be triggered regularly according their cron expressions. It's a Gauge.
+* **cronSchedulerJobTrigger:** Number of cron scheduled triggered, as a Meter.
+* **cronSchedulerJobSkipped:** Number of late cron scheduled skipped, as a Meter.
+* **cronSchedulerJobExecutionTimeMs:** Time used to complete task generation, as a Timer.
+
+For each task, the minion will emit these metrics:
+
+* _**TASK\_QUEUEING**_: Task queueing time (task\_dequeue\_time - task\_inqueue\_time), assuming the time drift between helix controller and pinot minion is minor, otherwise the value may be negative
+* _**TASK\_EXECUTION**_: Task execution time, which is the time spent on executing the task
+* _**NUMBER\_OF\_TASKS**_: number of tasks in progress on that minion. Whenever a Minion starts a task, increase the Gauge by 1, whenever a Minion completes (either succeeded or failed) a task, decrease it by 1
+* **NUMBER\_TASKS**_**\_**_**EXECUTED:** Number of tasks executed, as a Meter.
+* **NUMBER\_TASKS**_**\_**_**COMPLETED:** Number of tasks completed, as a Meter.
+* **NUMBER\_TASKS**_**\_**_**CANCELLED:** Number of tasks cancelled, as a Meter.
+* **NUMBER\_TASKS**_**\_**_**FAILED:** Number of tasks failed, as a Meter. Different from fatal failure, the task encountered an error which can not be recovered from this run, but it may still succeed by retrying the task.
+* **NUMBER\_TASKS**_**\_**_**FATAL**_**\_**_**FAILED:** Number of tasks fatal failed, as a Meter. Different from failure, the task encountered an error, which will not be recoverable even with retrying the task.

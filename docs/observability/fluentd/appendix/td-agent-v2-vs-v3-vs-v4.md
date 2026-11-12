@@ -1,0 +1,60 @@
+# td-agent v2 vs v3 vs v4
+
+{% hint style='danger' %}
+The series of td-agent had already reached End of Life (EOL). td-agent should not be newly installed because no support, no new release and no security updates anymore.
+{% endhint %}
+
+## Supported Platforms
+
+[ClearCode, Inc.](https://www.clear-code.com) maintains stable packages for Fluentd and canonical plugins as Treasure Agent \(the package is called `td-agent`\). `td-agent` has v2, v3 and v4. [Chronosphere](https://chronosphere.io/) (formerly Calyptia) maintains stable packages as Calyptia-fluentd as another option. Supported OS is the same as td-agent v4 currently.
+
+| Platform | v2 | v3 | v4\(x86\_64\) | v4\(Arm64\) |
+| :--- | :---: | :---: | :---: | :---: |
+| RedHat/CentOS 5 | ✔ |  |  |  |
+| RedHat/CentOS 6 | ✔ | ✔ |  |  |
+| RedHat/CentOS 7 | ✔ | ✔ | ✔ | ✔ |
+| RedHat/CentOS 8 |  | ✔ | ✔ | ✔ |
+| Amazon Linux 2 |  | ✔ | ✔ | ✔ |
+| Ubuntu Precise | ✔ |  |  |  |
+| Ubuntu Trusty | ✔ | ✔ |  |  |
+| Ubuntu Xenial | ✔ | ✔ | ✔ |  |
+| Ubuntu Bionic | ✔ | ✔ | ✔ | ✔ |
+| Ubuntu Focal |  |  | ✔ | ✔ |
+| Debian Jessie | ✔ | ✔ |  |  |
+| Debian Stretch | ✔ | ✔ |  |  |
+| Debian Buster |  | ✔ | ✔ | ✔ |
+| macOS | ✔ | ✔ |  |  |
+| Windows |  | ✔ | ✔ |  |
+
+## Features
+
+### `td-agent` v4
+
+New stable. Major feature updates to `td-agent` v4 are as follows:
+
+* Ruby 2.7
+* Fluentd v1
+* Arm64 Support
+
+See also [Changes from Treasure Agent 3](https://github.com/fluent-plugins-nursery/td-agent-builder#changes-from-treasure-agent-3).
+
+### `td-agent` v3
+
+Old stable.
+
+* Ruby 2.4
+* Fluentd v1
+* Windows Support
+* Remove `fluentd-ui` from the package
+
+### `td-agent` v2
+
+This is for v0.12 and old distribution users. We don't recommend this version for new deployments.
+
+## How to Install
+
+* [Ubuntu/Debian](../installation/install-by-deb-td-agent-v4.md)
+* [RedHat/CentOS](../installation/install-by-rpm-td-agent-v4.md)
+* [Windows](../installation/install-by-msi-td-agent-v4.md)
+* [macOS](../installation/install-by-dmg-td-agent-v4.md)
+* [RubyGems](../installation/install-by-gem.md)
